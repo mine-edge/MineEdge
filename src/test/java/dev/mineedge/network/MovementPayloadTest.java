@@ -14,6 +14,7 @@ import dev.mineedge.movement.MovementTuning;
 import dev.mineedge.movement.MovementFeatures;
 import dev.mineedge.movement.MovementVector;
 import dev.mineedge.movement.WallRunPose;
+import dev.mineedge.movement.RollPose;
 import dev.mineedge.movement.wall.WallState;
 import dev.mineedge.movement.landing.LandingState;
 import dev.mineedge.movement.AdvancedState;
@@ -31,22 +32,23 @@ import java.util.Random;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MovementPayloadTest {
-    @Test void trackingPosesRoundTripWithCompactGripsSlidesWallrunsAndRelease() {
+    @Test void trackingPosesRoundTripWithCompactGripsSlidesWallrunsRollsAndRelease() {
         var uuid = java.util.UUID.randomUUID();
         for (var hands : new dev.mineedge.movement.HandTargets[]{dev.mineedge.movement.HandTargets.EMPTY,
                 new dev.mineedge.movement.HandTargets(new MovementVector(-0.25, 1.75, 0.5),
                         new MovementVector(0.25, 1.5, 0.5), 1, 0.75F)}) for (boolean hanging : new boolean[]{false, true})
                 for (boolean sliding : new boolean[]{false, true})
-                for (var wallrun : new WallRunPose[]{WallRunPose.EMPTY, new WallRunPose(179.5F, -1, 5.6F), new WallRunPose(-90, 1, 3)}) {
-            var payload = new HandTargetsPayload(12, uuid, hands, hanging, sliding, sliding ? -179.5F : 0, wallrun);
+                for (var wallrun : new WallRunPose[]{WallRunPose.EMPTY, new WallRunPose(179.5F, -1, 5.6F), new WallRunPose(-90, 1, 3)})
+                for (var roll : new RollPose[]{RollPose.EMPTY, new RollPose(-179.5F, 0), new RollPose(90, 0.375F)}) {
+            var payload = new HandTargetsPayload(12, uuid, hands, hanging, sliding, sliding ? -179.5F : 0, wallrun, roll);
             var buf = buffer();
             try {
                 HandTargetsPayload.CODEC.encode(buf, payload);
-                assertTrue(buf.readableBytes() <= 66);
-                if (!hands.active()) assertEquals(18 + (sliding ? 4 : 0) + (wallrun.active() ? 12 : 0), buf.readableBytes());
+                assertTrue(buf.readableBytes() <= 74);
+                if (!hands.active()) assertEquals(18 + (sliding ? 4 : 0) + (wallrun.active() ? 12 : 0) + (roll.active() ? 8 : 0), buf.readableBytes());
                 assertEquals(payload, HandTargetsPayload.CODEC.decode(buf));
                 assertEquals(0, buf.readableBytes());
-                assertEquals(hands.active() || sliding || wallrun.active(), payload.active());
+                assertEquals(hands.active() || sliding || wallrun.active() || roll.active(), payload.active());
             } finally { buf.release(); }
         }
     }

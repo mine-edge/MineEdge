@@ -2,6 +2,7 @@ package dev.mineedge.integration;
 
 import net.minecraft.world.entity.player.Player;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockMakers;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -13,7 +14,7 @@ class TaczSprintCompatibilityTest {
 
     @Test void gunPermissionVetoesAndResumesEvenWhenTheEntityFlagIsFalse() throws ReflectiveOperationException {
         var permission = TaczSprintCompatibility.bind(GunOperator.class);
-        var player = mock(Player.class, withSettings().extraInterfaces(GunOperator.class));
+        var player = mock(Player.class, withSettings().mockMaker(MockMakers.SUBCLASS).extraInterfaces(GunOperator.class));
         var operator = (GunOperator) player;
         assertFalse(player.isSprinting());
         when(operator.getProcessedSprintStatus(true)).thenReturn(false);
@@ -25,7 +26,8 @@ class TaczSprintCompatibilityTest {
     }
 
     @Test void playersWithoutTheOptionalInterfaceKeepNativeSprintPermission() throws ReflectiveOperationException {
-        assertTrue(TaczSprintCompatibility.bind(GunOperator.class).test(mock(Player.class)));
-        assertTrue(TaczSprintCompatibility.allowed(mock(Player.class)), "The installed test mod list does not include TaCZ");
+        var player = mock(Player.class, withSettings().mockMaker(MockMakers.SUBCLASS));
+        assertTrue(TaczSprintCompatibility.bind(GunOperator.class).test(player));
+        assertTrue(TaczSprintCompatibility.allowed(player), "The installed test mod list does not include TaCZ");
     }
 }

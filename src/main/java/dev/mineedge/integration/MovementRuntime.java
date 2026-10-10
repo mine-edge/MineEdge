@@ -13,6 +13,7 @@ import dev.mineedge.movement.MovementVector;
 import dev.mineedge.movement.OffThreadMovement;
 import dev.mineedge.movement.SimulationLoop;
 import dev.mineedge.movement.WallRunPose;
+import dev.mineedge.movement.RollPose;
 import dev.mineedge.network.CommandInbox;
 import dev.mineedge.network.FullInputPayload;
 import dev.mineedge.network.HandTargetsPayload;
@@ -243,7 +244,8 @@ public final class MovementRuntime {
         float yaw = !sliding ? 0 : session.state.mode() == MovementState.Mode.STEEP_SLIDE ? session.state.surfaces().slopeYaw() : session.state.slideYaw();
         return new HandTargetsPayload(player.getId(), player.getUUID(), targets,
                 session.active && session.state.mode() == MovementState.Mode.LEDGE_HANG, sliding, yaw,
-                session.active ? WallRunPose.sample(session.state) : WallRunPose.EMPTY);
+                session.active ? WallRunPose.sample(session.state) : WallRunPose.EMPTY,
+                session.active ? RollPose.sample(session.state) : RollPose.EMPTY);
     }
 
     private static void applyInput(ServerPlayer player, FullInputPayload payload) {

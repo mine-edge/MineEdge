@@ -25,7 +25,9 @@ abstract class PlayerAnimationMixin {
         var shot = ThirdPersonHands.slideShot(entity);
         // Vanilla derives head-relative yaw from this same value, so looking around
         // remains correct while the body follows the actual movement direction.
-        return shot == null ? original : Mth.rotLerp(shot.weight(), original, shot.yaw());
+        if (shot != null) original = Mth.rotLerp(shot.weight(), original, shot.yaw());
+        var roll = ThirdPersonHands.rollShot(entity);
+        return roll == null ? original : Mth.rotLerp(roll.weight(), original, roll.yaw());
     }
 
     @ModifyExpressionValue(method = "render(Lnet/minecraft/world/entity/LivingEntity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V",
@@ -37,7 +39,9 @@ abstract class PlayerAnimationMixin {
         var shot = ClientMovement.INSTANCE.walkingPresentation(entity);
         float speed = shot == null ? original : shot.speed();
         var slide = ThirdPersonHands.slideShot(entity);
-        return slide == null ? speed : speed * (1 - slide.weight());
+        var roll = ThirdPersonHands.rollShot(entity);
+        float weight = Math.max(slide == null ? 0 : slide.weight(), roll == null ? 0 : roll.weight());
+        return speed * (1 - weight);
     }
 
     @ModifyExpressionValue(method = "render(Lnet/minecraft/world/entity/LivingEntity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V",

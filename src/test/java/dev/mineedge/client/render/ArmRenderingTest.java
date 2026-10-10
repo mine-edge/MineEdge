@@ -14,6 +14,21 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ArmRenderingTest {
+    @Test void modelPartAnglesPreserveCombinedQuaternionRotationsAcrossYawSeamsAndFullTurns() {
+        var part = new ModelPart(List.of(), java.util.Map.of());
+        var pivot = new Vector3f(5, 2, -3);
+        for (float yaw : new float[]{-3.1F, (float) -Math.PI / 2, -1.4F, 0, 1.4F, (float) Math.PI / 2, 3.1F})
+                for (float pitch : new float[]{-2.8F, -1.2F, 0.35F, 1.8F, 3.5F, 6.2F}) {
+            var target = new Quaternionf().rotationZYX(0.4F, yaw, pitch);
+            RigidLimbIk.apply(part, new RigidLimbIk.Pose(pivot, target));
+            assertEquals(0, pivot.distance(new Vector3f(part.x, part.y, part.z)), 1.0E-6);
+            var rendered = ThirdPersonSlide.rotation(part);
+            for (var axis : new Vector3f[]{new Vector3f(1, 0, 0), new Vector3f(0, 1, 0), new Vector3f(0, 0, 1)}) {
+                assertEquals(0, target.transform(new Vector3f(axis)).distance(rendered.transform(new Vector3f(axis))), 1.0E-5);
+            }
+        }
+    }
+
     private static ModelPart.Cube cube(boolean slim, float grow, int side) {
         return new ModelPart.Cube(32, 48, side > 0 ? -1 : (slim ? -2 : -3), -2, -2, slim ? 3 : 4, 12, 4,
                 grow, grow, grow, false, 64, 64, EnumSet.allOf(Direction.class));

@@ -8,12 +8,13 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodData;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockMakers;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class MovementSprintTest {
     private static Player player() {
-        var player = mock(Player.class);
+        var player = mock(Player.class, withSettings().mockMaker(MockMakers.SUBCLASS));
         when(player.canSprint()).thenReturn(true);
         when(player.getFoodData()).thenReturn(new FoodData());
         return player;

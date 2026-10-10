@@ -8,6 +8,7 @@ import dev.mineedge.client.render.ThirdPersonHands;
 import dev.mineedge.client.render.ThirdPersonLegs;
 import dev.mineedge.client.render.ThirdPersonSlide;
 import dev.mineedge.client.render.ThirdPersonWallRun;
+import dev.mineedge.client.render.ThirdPersonRoll;
 import net.minecraft.client.model.EntityModel;
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.player.AbstractClientPlayer;
@@ -51,10 +52,11 @@ abstract class ThirdPersonHandsMixin<T extends LivingEntity> {
             at = @At(value = "INVOKE", target = "Lnet/minecraft/client/model/EntityModel;setupAnim(Lnet/minecraft/world/entity/Entity;FFFFF)V"))
     private void mineedge$slideBase(T entity, float yaw, float partialTick, PoseStack poses, MultiBufferSource buffers, int light, CallbackInfo ci) {
         var shot = ThirdPersonHands.slideShot(entity);
-        if (shot != null && model instanceof PlayerModel<?> playerModel) {
+        float weight = Math.max(shot == null ? 0 : shot.weight(), ThirdPersonHands.rollProneWeight(entity));
+        if (weight > 0 && model instanceof PlayerModel<?> playerModel) {
             mineedge$swimAmount = playerModel.swimAmount;
             mineedge$slideModel = true;
-            playerModel.swimAmount *= 1 - shot.weight();
+            playerModel.swimAmount *= 1 - weight;
         }
     }
 
@@ -63,6 +65,11 @@ abstract class ThirdPersonHandsMixin<T extends LivingEntity> {
     private void mineedge$solve(T entity, float yaw, float partialTick, PoseStack poses, MultiBufferSource buffers, int light, CallbackInfo ci) {
         if (!MineEdgeClientConfig.THIRD_PERSON_ANIMATIONS.get()) return;
         if (entity instanceof AbstractClientPlayer player && model instanceof PlayerModel<?> playerModel) {
+            var roll = ThirdPersonHands.rollShot(player);
+            if (roll != null) {
+                mineedge$bodyBack = ThirdPersonRoll.apply(player, playerModel, roll);
+                return;
+            }
             mineedge$bodyBack = ThirdPersonWallRun.apply(player, playerModel, ThirdPersonHands.wallRunShot(player));
             var slideBack = ThirdPersonSlide.apply(player, playerModel, ThirdPersonHands.slideShot(player));
             if (slideBack != null) mineedge$bodyBack = mineedge$bodyBack == null ? slideBack : slideBack.mul(mineedge$bodyBack);
