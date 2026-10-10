@@ -19,6 +19,7 @@ out/
 bin/
 
 # Minecraft development runs and data-generation cache
+logs/
 run/
 run-data/
 run-gametest/
