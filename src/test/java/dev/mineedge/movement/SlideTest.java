@@ -112,22 +112,38 @@ class SlideTest {
     }
 
     @Test
-    void slideEntryRequiresSprintEvenWithEnoughForwardMomentum() {
+    void slideEntryUsesForwardMomentumWithOrWithoutSprint() {
         World world = new World();
         var crouch = input(1, true, true, false, 0, 1, 0);
         for (double speed : new double[]{4, 6}) {
             events.clear();
             var start = moving().withVelocity(new MovementVector(0, 0, speed));
             var walking = tick(start, crouch.withSprint(false), world);
-            assertEquals(MovementState.Mode.GROUND, walking.mode());
-            assertEquals(MovementBody.CROUCHING, walking.body());
-            assertFalse(events.contains(MovementEvent.SLIDE_START));
+            assertEquals(MovementState.Mode.SLIDE, walking.mode());
+            assertEquals(MovementBody.LOW, walking.body());
+            assertEquals(List.of(MovementEvent.SLIDE_START), events);
+            var replay = controller.tick(start, crouch.withSprint(false), MovementTuning.DEFAULT, new World(), event -> {});
+            assertEquals(walking, replay);
+            events.clear();
             var sprinting = tick(start, crouch, world);
             assertEquals(MovementState.Mode.SLIDE, sprinting.mode());
             assertTrue(events.contains(MovementEvent.SLIDE_START));
             var continuing = tick(sprinting, input(2, true, false, false, 0, 1, 0).withSprint(false), world);
             assertEquals(MovementState.Mode.SLIDE, continuing.mode());
         }
+    }
+
+    @Test
+    void walkingRunUpCanStartASlideWithoutSprint() {
+        World world = new World();
+        var state = MovementControllerTest.grounded();
+        for (int n = 1; n <= 20; n++)
+            state = tick(state, input(n, false, false, false, 0, 1, 0).withSprint(false), world);
+        assertEquals(MovementTuning.DEFAULT.walkSpeed(), state.velocity().horizontalSpeed(), 0.01);
+        state = tick(state, input(21, true, true, false, 0, 1, 0).withSprint(false), world);
+        assertEquals(MovementState.Mode.SLIDE, state.mode());
+        assertEquals(MovementBody.LOW, state.body());
+        assertEquals(List.of(MovementEvent.SLIDE_START), events);
     }
 
     @Test
@@ -162,7 +178,7 @@ class SlideTest {
     }
 
     @Test
-    void jumpLandingSlideRequiresSprintHeldCrouchAndRunUpMomentum() {
+    void jumpLandingSlideRequiresHeldCrouchAndRunUpMomentumButNotSprint() {
         for (int scenario = 0; scenario < 3; scenario++) {
             events.clear(); World world = new World();
             var state = MovementControllerTest.grounded();
@@ -175,8 +191,15 @@ class SlideTest {
                 var command = input(sequence++, crouch, n == 0, false, 0, 1, 0).withSprint(scenario != 0);
                 state = tick(state, command, world);
             }
-            assertTrue(state.grounded()); assertNotEquals(MovementState.Mode.SLIDE, state.mode());
-            assertFalse(events.contains(MovementEvent.SLIDE_START), "Unexpected landing slide for scenario=" + scenario);
+            assertTrue(state.grounded());
+            if (scenario == 0) {
+                assertEquals(MovementState.Mode.SLIDE, state.mode());
+                assertEquals(MovementBody.LOW, state.body());
+                assertEquals(1, events.stream().filter(event -> event == MovementEvent.SLIDE_START).count());
+            } else {
+                assertNotEquals(MovementState.Mode.SLIDE, state.mode());
+                assertFalse(events.contains(MovementEvent.SLIDE_START), "Unexpected landing slide for scenario=" + scenario);
+            }
         }
     }
 
