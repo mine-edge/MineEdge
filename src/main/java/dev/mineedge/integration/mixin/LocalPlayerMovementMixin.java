@@ -2,7 +2,9 @@ package dev.mineedge.integration.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import dev.mineedge.integration.MovementRuntime;
+import dev.mineedge.integration.MovementSprint;
 import dev.mineedge.client.movement.ClientMovement;
 import dev.mineedge.movement.MovementBody;
 import net.minecraft.client.player.LocalPlayer;
@@ -26,15 +28,24 @@ abstract class LocalPlayerMovementMixin {
         original.call(input, MovementRuntime.owns((LocalPlayer) (Object) this) ? false : slow, modifier);
     }
 
-    @WrapOperation(method = "aiStep()V", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/client/player/LocalPlayer;setSprinting(Z)V"))
-    private void mineedge$sprint(LocalPlayer player, boolean sprinting, Operation<Void> original) {
-        original.call(player, sprinting);
-        if (MovementRuntime.owns(player)) {
-            // Preserve vanilla double-tap detection and other mods' sprint decisions.
-            // The entity flag is also written by prediction and server metadata.
-            ClientMovement.INSTANCE.sprintChanged(player.isSprinting());
-        }
+    @Inject(method = "aiStep()V", at = @At("HEAD"))
+    private void mineedge$nativeSprint(CallbackInfo callback) {
+        ClientMovement.INSTANCE.beginNativeSprint((LocalPlayer) (Object) this);
+    }
+
+    @Inject(method = "aiStep()V", at = @At("RETURN"))
+    private void mineedge$sprintDecision(CallbackInfo callback) {
+        LocalPlayer player = (LocalPlayer) (Object) this;
+        ClientMovement.INSTANCE.sprintChanged(player, player.isSprinting());
+    }
+
+    @ModifyReturnValue(method = "canStartSprinting()Z", at = @At("RETURN"))
+    private boolean mineedge$sprintEligibility(boolean original) {
+        LocalPlayer player = (LocalPlayer) (Object) this;
+        // Native input crouch scaling is bypassed above. Restore its sprint gate
+        // without replacing vanilla's predicate or another mod's veto.
+        return original && (!MovementRuntime.owns(player) || !player.input.shiftKeyDown
+                && ClientMovement.INSTANCE.body() == MovementBody.STANDING && MovementSprint.allowed(player));
     }
 
     @Inject(method = "updateAutoJump(FF)V", at = @At("HEAD"), cancellable = true)

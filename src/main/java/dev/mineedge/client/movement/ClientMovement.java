@@ -116,9 +116,20 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
         }
     }
 
-    /** Called only for native aiStep sprint decisions, not simulation or metadata writes. */
-    public void sprintChanged(boolean sprinting) {
-        sprint.update(sprinting);
+    /** Native and mod sprint decisions, excluding our simulation/presentation writes. */
+    @Override
+    public void sprintChanged(Player player, boolean sprinting) {
+        if (player == owner && active) sprint.update(sprinting);
+    }
+
+    public void beginNativeSprint(LocalPlayer player) {
+        if (!owns(player)) return;
+        // Vanilla continuation must see its last approved decision, not a flag
+        // cleared by a slide/crouch pose or overwritten by entity metadata.
+        // Keep the entry tick's intent for sliding; held crouch stops it next tick.
+        if (player.input.shiftKeyDown || state.mode() == MovementState.Mode.HARD_LANDING) sprint.update(false);
+        boolean accepted = MovementSprint.setSprinting(player, sprint.requested());
+        if (!accepted) sprint.update(false);
     }
 
     public void capture(MovementInputUpdateEvent event) {
@@ -195,8 +206,8 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
         boolean jump = keys.jumping;
         boolean crouch = keys.shiftKeyDown;
         var edges = latch.capture(jump, crouch, MovementKeys.TURN.isDown(), blocked);
-        boolean sprintHeld = sprint.capture(minecraft.options.keySprint.isDown(), forward > 0.7F && !crouch
-                && (state == null || state.mode() != MovementState.Mode.HARD_LANDING && state.surfaces().climb() == null),
+        boolean sprintHeld = sprint.capture(keys.hasForwardImpulse()
+                && (state == null || state.mode() != MovementState.Mode.HARD_LANDING),
                 MovementSprint.allowed(player), blocked);
         return new MovementInput(commandSequence, blocked ? 0 : forward, blocked ? 0 : strafe,
                 blocked ? 0 : rawStrafe, !blocked && jump, edges.jump(), !blocked && crouch, edges.crouch(),
@@ -230,7 +241,9 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
         if (player == null || !owns(player) || suspended) return;
         MovementCamera.restrictLook();
         importImpulse(player);
-        input = sampleInput(player, ++sequence, buttons);
+        var requested = sampleInput(player, ++sequence, buttons);
+        input = MovementSprint.apply(player, requested, state);
+        if (requested.sprintHeld() && !input.sprintHeld()) sprint.update(false);
         if (suspended || !history.add(input, impulses.pending())) {
             suspended = true;
             history.clear();
@@ -246,7 +259,6 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
             var dispatch = outgoing.poll(System.nanoTime(), intervalNanos);
             if (dispatch != null) dispatch.send();
         }
-        MovementSprint.apply(player, input, state);
         impulses.consume();
         var previous = state;
         var before = MinecraftMotionAdapter.core(player.position());

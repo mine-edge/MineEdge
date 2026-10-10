@@ -87,7 +87,7 @@ public final class MinecraftMotionAdapter {
             public void body(MovementBody body) {
                 MovementPoses.apply(player, body);
                 if (body != MovementBody.STANDING) {
-                    player.setSprinting(false);
+                    MovementSprint.setSprinting(player, false);
                 }
             }
 
@@ -235,7 +235,7 @@ public final class MinecraftMotionAdapter {
     public static void apply(Player player, MovementState state) {
         player.setPos(minecraft(state.position()));
         MovementPoses.apply(player, state.body());
-        if (state.mode() == MovementState.Mode.HARD_LANDING) player.setSprinting(false);
+        if (state.mode() == MovementState.Mode.HARD_LANDING) MovementSprint.setSprinting(player, false);
         player.setDeltaMovement(minecraft(state.velocity().scale(1.0 / 20)));
         player.setOnGround(state.grounded());
         player.fallDistance = state.fallDistance();

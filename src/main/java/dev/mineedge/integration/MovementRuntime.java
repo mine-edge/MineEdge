@@ -42,6 +42,7 @@ public final class MovementRuntime {
         boolean owns(Player player);
         void reset();
         void pose(Player player);
+        void sprintChanged(Player player, boolean sprinting);
     }
 
     private static final MovementController CONTROLLER = new MovementController();
@@ -57,6 +58,10 @@ public final class MovementRuntime {
         if (client != null) {
             client.reset();
         }
+    }
+
+    public static void sprintChanged(Player player) {
+        if (client != null && player.level().isClientSide()) client.sprintChanged(player, player.isSprinting());
     }
 
     public static boolean owns(Player player) {
@@ -167,10 +172,9 @@ public final class MovementRuntime {
             MovementVector currentVelocity = MinecraftMotionAdapter.core(player.getDeltaMovement());
             var impulse = currentVelocity.subtract(session.writtenVelocity).scale(20);
             session.state = session.state.withVelocity(session.state.velocity().add(impulse));
-            session.input = MovementSprint.validate(player, command);
-            player.setYRot(session.input.yaw());
-            player.setXRot(session.input.pitch());
-            MovementSprint.apply(player, session.input, session.state);
+            player.setYRot(command.yaw());
+            player.setXRot(command.pitch());
+            session.input = MovementSprint.apply(player, command, session.state);
             var result = OffThreadMovement.step(CONTROLLER, session.state, session.input, session.tuning,
                     MinecraftMotionAdapter.live(player));
             session.state = result.state();

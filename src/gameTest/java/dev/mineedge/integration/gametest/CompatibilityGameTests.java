@@ -10,6 +10,7 @@ import dev.mineedge.integration.MovementRuntime;
 import dev.mineedge.movement.MovementBody;
 import dev.mineedge.movement.LocomotionState;
 import dev.mineedge.movement.MovementInput;
+import dev.mineedge.movement.MovementController;
 import dev.mineedge.movement.MovementState;
 import dev.mineedge.movement.MovementVector;
 import java.util.List;
@@ -20,7 +21,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.ConnectionProtocol;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -196,12 +203,60 @@ public final class CompatibilityGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void serverSprintSetterVetoChangesAuthoritativePhysics(GameTestHelper helper) throws ReflectiveOperationException {
+        var simulate = MovementRuntime.class.getDeclaredMethod("simulate", ServerPlayer.class, dev.mineedge.integration.MovementSession.class);
+        simulate.setAccessible(true);
+        var controller = new MovementController();
+        for (boolean veto : new boolean[] {false, true}) {
+            var player = player(helper, veto);
+            var connection = new Connection(PacketFlow.SERVERBOUND) {
+                @Override public boolean isConnected() { return true; }
+            };
+            player.connection = new ServerGamePacketListenerImpl(helper.getLevel().getServer(), connection, player,
+                    CommonListenerCookie.createInitial(player.getGameProfile(), false)) {
+                @Override public void send(Packet<?> packet) {}
+            };
+            helper.getLevel().addFreshEntity(player);
+            var session = MovementRuntime.session(player);
+            try {
+                player.setOnGround(true);
+                session.active = true;
+                session.state = MinecraftMotionAdapter.capture(player);
+                session.tuning = MovementRuntime.effectiveTuning(player);
+                var expected = session.state;
+                for (int sequence = 1; sequence <= 30; sequence++) {
+                    var input = new MovementInput(sequence, 1, 0, 0, false, false, false, false, true, 0, 0);
+                    session.inbox.offer(input, session.simulationStep);
+                    expected = controller.step(expected, input.withSprint(!veto), session.tuning,
+                            MinecraftMotionAdapter.replay(player), event -> {});
+                    simulate.invoke(null, player, session);
+                    helper.assertTrue(session.active && session.input.sprintHeld() == !veto && player.isSprinting() == !veto,
+                            "Server simulation ignored the sprint setter's final decision");
+                    helper.assertTrue(session.state.position().subtract(expected.position()).length() < 1.0E-6
+                                    && session.state.velocity().subtract(expected.velocity()).length() < 1.0E-6,
+                            "Native sprint flag and authoritative acceleration disagreed");
+                }
+            } finally {
+                session.reset();
+                player.discard();
+            }
+        }
+        helper.succeed();
+    }
+
     private static FakePlayer player(GameTestHelper helper) {
+        return player(helper, false);
+    }
+
+    private static FakePlayer player(GameTestHelper helper, boolean vetoSprint) {
         for (int x = 1; x <= 13; x++) for (int z = 1; z <= 13; z++) helper.setBlock(new BlockPos(x, 0, z), Blocks.STONE);
         var origin = helper.absolutePos(new BlockPos(7, 1, 7));
         for (int x = (origin.getX() >> 4) - 2; x <= (origin.getX() >> 4) + 2; x++)
             for (int z = (origin.getZ() >> 4) - 2; z <= (origin.getZ() >> 4) + 2; z++) helper.getLevel().getChunk(x, z);
-        var player = new FakePlayer(helper.getLevel(), new GameProfile(UUID.randomUUID(), "MineEdgeCompat"));
+        var player = new FakePlayer(helper.getLevel(), new GameProfile(UUID.randomUUID(), "MineEdgeCompat")) {
+            @Override public void setSprinting(boolean sprinting) { super.setSprinting(sprinting && !vetoSprint); }
+        };
         player.setPos(Vec3.atLowerCornerOf(origin).add(0.5, 0, 0.5));
         return player;
     }

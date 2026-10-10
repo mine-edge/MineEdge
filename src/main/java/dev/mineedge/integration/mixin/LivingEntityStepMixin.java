@@ -7,6 +7,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.mineedge.integration.MovementRuntime;
 import dev.mineedge.integration.MovementFacing;
 import dev.mineedge.integration.ResolvedMovement;
+import dev.mineedge.integration.MovementSprint;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
@@ -17,6 +18,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(LivingEntity.class)
 abstract class LivingEntityStepMixin {
+    @Inject(method = "setSprinting(Z)V", at = @At("RETURN"))
+    private void mineedge$sprintChanged(boolean sprinting, CallbackInfo callback) {
+        if ((Object) this instanceof Player player) MovementSprint.changed(player);
+    }
+
     @WrapOperation(method = "tick()V", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/entity/LivingEntity;tickHeadTurn(FF)F"))
     private float mineedge$bodyFacing(LivingEntity entity, float yaw, float animationStep, Operation<Float> original) {

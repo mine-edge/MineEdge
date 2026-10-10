@@ -6,8 +6,10 @@ public final class SprintLatch {
 
     public void update(boolean sprinting) { requested = sprinting; }
 
-    public boolean capture(boolean keyHeld, boolean continuing, boolean allowed, boolean blocked) {
+    public boolean requested() { return requested; }
+
+    public boolean capture(boolean continuing, boolean allowed, boolean blocked) {
         if (!continuing || !allowed || blocked) requested = false;
-        return !blocked && allowed && (keyHeld || requested);
+        return requested;
     }
 }
