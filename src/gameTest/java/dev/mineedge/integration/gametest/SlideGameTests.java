@@ -120,6 +120,21 @@ public final class SlideGameTests {
     }
 
     @GameTest(template = "empty", timeoutTicks = 40)
+    public static void slideJumpKeepsMomentumAndNativePoseAndReplays(GameTestHelper helper) {
+        floor(helper);
+        for (boolean crouch : new boolean[]{false, true}) {
+            MovementState state = compare(helper, moving(helper, 3.5), 2,
+                    tick -> input(tick, tick == 1 || crouch, tick == 1, tick == 2, 0));
+            helper.assertTrue(state.mode() == MovementState.Mode.AIR && !state.grounded(), "Jump did not interrupt the slide");
+            helper.assertTrue(Math.abs(state.velocity().y() - (MovementTuning.DEFAULT.jumpSpeed() - MovementTuning.DEFAULT.gravity() / 20)) < 1.0E-6,
+                    "Slide jump did not use the normal launch velocity");
+            helper.assertTrue(state.velocity().horizontalSpeed() > 6, "Slide jump applied exit braking");
+            helper.assertTrue(state.body() == (crouch ? MovementBody.CROUCHING : MovementBody.STANDING), "Slide jump used the wrong airborne pose");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
     public static void slideExitStaysLowUntilHeadroomReturns(GameTestHelper helper) {
         floor(helper);
         for (int z = 1; z <= 13; z++) {

@@ -2,6 +2,7 @@ package dev.mineedge.movement.surface;
 
 import dev.mineedge.movement.*;
 import dev.mineedge.movement.collision.*;
+import dev.mineedge.movement.landing.LandingState;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -495,6 +496,35 @@ class SurfaceControllerTest {
         var state = tick(ground(MovementVector.ZERO, 2), world, input(2, 0, false, false));
         state = tick(state.withVelocity(state.velocity().add(new MovementVector(0, 3, 0))), world, input(3, 0, false, false));
         assertNotEquals(MovementState.Mode.STEEP_SLIDE, state.mode()); assertTrue(state.surfaces().slopeCooldown() > 0);
+    }
+
+    @Test void steepSlideJumpUsesSupportedContactAndReplaysWithoutReattaching() {
+        var world = new World(FLOOR); world.steep = true;
+        var start = tick(ground(MovementVector.ZERO, 2), world, input(1, 0, false, false));
+        assertEquals(MovementState.Mode.STEEP_SLIDE, start.mode());
+        events.clear();
+        var command = input(2, 0, true, false);
+        var state = tick(start, world, command);
+        var replay = controller.tick(start, command, MovementTuning.DEFAULT, world, event -> {});
+        assertEquals(state, replay);
+        assertEquals(MovementState.Mode.AIR, state.mode()); assertFalse(state.grounded());
+        assertEquals(MovementTuning.DEFAULT.jumpSpeed() - MovementTuning.DEFAULT.gravity() / 20, state.velocity().y(), 1.0E-9);
+        assertTrue(state.velocity().horizontalSpeed() >= start.velocity().horizontalSpeed());
+        assertEquals(LandingState.Source.JUMP, state.landing().source());
+        assertTrue(state.surfaces().slopeCooldown() > 0);
+        assertEquals(List.of(MovementEvent.STEEP_SLIDE_END, MovementEvent.JUMP), events);
+
+        events.clear();
+        var unsupported = new MovementState(start.position().add(new MovementVector(0, 1, 0)), start.velocity(), start.mode(),
+                start.modeTime(), false, 0, start.locomotion(), start.blocks(), start.body(), start.slideYaw(), start.traversal(),
+                start.wall(), start.landing(), start.advanced(), start.surfaces());
+        tick(unsupported, world, command);
+        assertFalse(events.contains(MovementEvent.JUMP), "Steep slide jumped without support");
+
+        events.clear();
+        var launched = tick(start.withVelocity(start.velocity().add(new MovementVector(0, 3, 0))), world, command);
+        assertEquals(MovementState.Mode.AIR, launched.mode());
+        assertFalse(events.contains(MovementEvent.JUMP), "Upward knockback received another slide jump");
     }
     @Test void softLandingUsesReferenceRecoveryAndIgnoresBufferedJump() {
         var world = new World(FLOOR); world.soft = true;

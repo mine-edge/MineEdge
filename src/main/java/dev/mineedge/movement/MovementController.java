@@ -134,9 +134,19 @@ public final class MovementController {
             }
             landing = landing.observe(position, grounded, false);
             resolver.landing(landing, tuning);
+            boolean slopeJump = mode == MovementState.Mode.STEEP_SLIDE && step == 0 && input.jumpPressed()
+                    && velocity.y() <= 0 && tuning.jumpSpeed() > 0 && resolver.surface(position, MovementBody.LOW) != null
+                    && resolver.canOccupy(position, MovementBody.STANDING);
+            if (slopeJump) {
+                // Steep slides may follow support without a native grounded flag.
+                grounded = true;
+                mode = MovementState.Mode.GROUND;
+                surfaces = surfaces.slopeExit();
+                events.accept(MovementEvent.STEEP_SLIDE_END);
+            }
             boolean surfaceEligible = traversal.path() == null && advanced.ledge() == null && advanced.spring() == null && !advanced.coiled()
                     && (mode == MovementState.Mode.GROUND || mode == MovementState.Mode.AIR || mode == MovementState.Mode.WALLRUN);
-            var surfaceStep = SurfaceController.step(resolver, position, velocity, grounded, mode, body, time, surfaces,
+            var surfaceStep = slopeJump ? null : SurfaceController.step(resolver, position, velocity, grounded, mode, body, time, surfaces,
                     blocks, input, tuning, step == 0, surfaceEligible, events);
             if (surfaceStep != null) {
                 Motion motion = surfaceStep.motion();
@@ -358,7 +368,7 @@ public final class MovementController {
                 body = exitBody(resolver, position, input.crouchHeld());
             }
             if (traversal.path() == null && mode != MovementState.Mode.SLIDE && !WallController.active(mode) && !advanced.coiled()) {
-                if (step == 0 && input.crouchPressed() && grounded && body == MovementBody.STANDING
+                if (!slopeJump && step == 0 && input.crouchPressed() && grounded && body == MovementBody.STANDING
                         && Slide.canStart(velocity, input, tuning) && resolver.canOccupy(position, MovementBody.LOW)) {
                     mode = MovementState.Mode.SLIDE;
                     time = 0;
@@ -370,17 +380,24 @@ public final class MovementController {
                     body = exitBody(resolver, position, input.crouchHeld());
                 }
             }
-            if (traversal.path() == null && mode != MovementState.Mode.SLIDE && jumpBuffer > 0 && grounded && tuning.jumpSpeed() > 0
+            boolean slideJump = slopeJump || mode == MovementState.Mode.SLIDE && step == 0 && input.jumpPressed();
+            if (traversal.path() == null && (slideJump || mode != MovementState.Mode.SLIDE && jumpBuffer > 0) && grounded && tuning.jumpSpeed() > 0
                     && resolver.canOccupy(position, MovementBody.STANDING)) {
                 body = MovementBody.STANDING;
                 MovementVector facing = input.forwardDirection();
-                var spring = tuning.features().vaulting() && traversal.cooldown() == 0
+                var spring = !slideJump && tuning.features().vaulting() && traversal.cooldown() == 0
                         ? AdvancedMoves.springboard(resolver, position, velocity, input) : null;
                 if (spring != null) {
                     advanced = advanced.spring(spring);
                     traversal = new TraversalState(null, 0, velocity);
                     jumpBuffer = 0;
                     continue;
+                }
+                if (slideJump) {
+                    // A jump interrupts the minimum slide duration without exit braking.
+                    mode = MovementState.Mode.AIR;
+                    time = 0;
+                    if (!slopeJump) events.accept(MovementEvent.SLIDE_END);
                 }
                 landing = landing.takeoff(position, LandingState.Source.JUMP, velocity.horizontalSpeed());
                 if (velocity.dot(facing) > 0.1 * tuning.walkSpeed() / 4) {
@@ -574,7 +591,7 @@ public final class MovementController {
             double traction = grounded ? resolver.groundTraction(position, body) : 1;
             Locomotion.Result result;
             if (sliding) {
-                jumpBuffer = 0; // Never queue a jump during a slide, including its exit substep.
+                jumpBuffer = 0; // Blocked slide jumps must not queue a launch after clearance or exit.
                 time += MovementTuning.SUBSTEP_SECONDS;
                 Slide.Step slide = Slide.step(velocity, slideYaw, input, tuning, time, MovementTuning.SUBSTEP_SECONDS, traction);
                 slideYaw = slide.yaw();
