@@ -1,0 +1,19 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.mineedge.integration.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "EntityCollisionMixin",
+    "PistonLaunchMixin",
+    "ChunkCollisionMixin",
+    "EntityMotionAccessor",
+    "PlayerMovementMixin",
+    "LivingEntityStepMixin",
+    "LivingEntityAccessor",
+    "ServerConnectionAccessor",
+    "ServerConnectionMixin"
+  ],
+  "client": ["LocalPlayerMovementMixin", "ClientConnectionMixin", "CameraPresentationMixin", "PlayerPresentationMixin", "CapePresentationMixin", "PlayerAnimationMixin", "PlayerSlideMixin", "ThirdPersonHandsMixin", "ModelPartIkMixin", "PlayerCapeMixin", "RenderAnimationMixin", "PlayerLookMixin"],
+  "injectors": {"defaultRequire": 1}
+}

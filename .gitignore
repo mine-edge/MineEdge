@@ -1,0 +1,30 @@
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
+
+# Gradle and Java build outputs
+.gradle/
+build/
+out/
+*.class
+
+# Minecraft development runs and data-generation cache
+run/
+run-data/
+run-gametest/
+src/generated/resources/.cache/
+
+# IDE files
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+.vscode/
