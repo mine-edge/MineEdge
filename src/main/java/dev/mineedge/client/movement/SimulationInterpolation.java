@@ -19,7 +19,11 @@ public final class SimulationInterpolation {
     }
 
     public MovementVector position(long now) {
-        long target = now - MovementRate.INTERVAL_NANOS;
+        return position(now, MovementRate.INTERVAL_NANOS);
+    }
+
+    public MovementVector position(long now, long intervalNanos) {
+        long target = now - intervalNanos;
         Sample previous = null;
         for (var next : samples) {
             if (next.time() >= target) {

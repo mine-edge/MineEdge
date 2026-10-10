@@ -15,29 +15,49 @@ public final class SimulationLoop implements AutoCloseable {
         return thread;
     });
     private final AtomicBoolean pending = new AtomicBoolean();
+    private final Executor gameThread;
+    private final Runnable step;
     private volatile boolean closed;
-    private final ScheduledFuture<?> timer;
+    private ScheduledFuture<?> timer;
+    private long intervalNanos;
 
     public SimulationLoop(Executor gameThread, Runnable step) {
-        timer = CLOCK.scheduleAtFixedRate(() -> {
-            if (closed || !pending.compareAndSet(false, true)) return;
-            try {
-                gameThread.execute(() -> {
-                    try {
-                        if (!closed) step.run();
-                    } finally {
-                        pending.set(false);
-                    }
-                });
-            } catch (RuntimeException exception) {
-                pending.set(false);
-                close();
-            }
-        }, MovementRate.INTERVAL_NANOS, MovementRate.INTERVAL_NANOS, TimeUnit.NANOSECONDS);
+        this(gameThread, step, MovementRate.GAME_TICK_HZ);
+    }
+
+    public SimulationLoop(Executor gameThread, Runnable step, float tickRate) {
+        this.gameThread = gameThread;
+        this.step = step;
+        setTickRate(tickRate);
+    }
+
+    /** Changing the rate preserves session state and never queues catch-up steps. */
+    public synchronized void setTickRate(float tickRate) {
+        long interval = MovementRate.intervalNanos(tickRate);
+        if (closed || interval == intervalNanos) return;
+        intervalNanos = interval;
+        if (timer != null) timer.cancel(false);
+        timer = CLOCK.scheduleAtFixedRate(this::queueStep, interval, interval, TimeUnit.NANOSECONDS);
+    }
+
+    private void queueStep() {
+        if (closed || !pending.compareAndSet(false, true)) return;
+        try {
+            gameThread.execute(() -> {
+                try {
+                    if (!closed) step.run();
+                } finally {
+                    pending.set(false);
+                }
+            });
+        } catch (RuntimeException exception) {
+            pending.set(false);
+            close();
+        }
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         closed = true;
         if (timer != null) timer.cancel(false);
     }

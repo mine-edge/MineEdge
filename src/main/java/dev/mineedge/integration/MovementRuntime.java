@@ -123,8 +123,12 @@ public final class MovementRuntime {
             session.writtenVelocity = MinecraftMotionAdapter.core(player.getDeltaMovement());
         }
         if (session.active && session.simulation == null) {
-            session.simulation = new SimulationLoop(player.getServer(), () -> simulate(player, session));
+            session.simulation = new SimulationLoop(player.getServer(), () -> simulate(player, session),
+                    player.getServer().tickRateManager().tickrate());
             SIMULATIONS.put(player.getUUID(), session);
+        }
+        if (session.simulation != null) {
+            session.simulation.setTickRate(player.getServer().tickRateManager().tickrate());
         }
     }
 

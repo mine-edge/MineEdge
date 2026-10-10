@@ -26,6 +26,7 @@ public final class CapePresentation {
     }
 
     public MovementVector sample(long now) { return offsets.position(now); }
+    public MovementVector sample(long now, long intervalNanos) { return offsets.position(now, intervalNanos); }
 
     /** A physics correction shifts both the player and its trailing cape, without adding motion. */
     public void translate(MovementVector displacement) {

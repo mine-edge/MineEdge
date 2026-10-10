@@ -1,5 +1,6 @@
 package dev.mineedge.client.movement;
 
+import dev.mineedge.movement.MovementRate;
 import dev.mineedge.movement.MovementVector;
 import net.minecraft.world.entity.WalkAnimationState;
 
@@ -22,7 +23,11 @@ public final class WalkingPresentation {
     }
 
     public Shot sample(long now) {
-        var sample = walking.position(now);
+        return sample(now, MovementRate.INTERVAL_NANOS);
+    }
+
+    public Shot sample(long now, long intervalNanos) {
+        var sample = walking.position(now, intervalNanos);
         return sample == null ? null : new Shot((float) sample.x(), (float) sample.y());
     }
 

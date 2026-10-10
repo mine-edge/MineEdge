@@ -56,7 +56,10 @@ public final class ThirdPersonHands {
             }
         }
 
-        boolean fresh() { return !relative || frame - received < 1_000_000_000L; }
+        boolean fresh() {
+            long tickInterval = ClientMovement.INSTANCE.intervalNanos() * MovementRate.STEPS_PER_GAME_TICK;
+            return !relative || frame - received < Math.max(1_000_000_000L, 2 * tickInterval);
+        }
 
         HandTargets sample() {
             if (sampled == frame || paused && sampled != 0) return shot;
@@ -68,9 +71,10 @@ public final class ThirdPersonHands {
             rightWeight += ((fresh ? targets.rightWeight() : 0) - rightWeight) * (float) alpha;
             if (leftWeight < 0.001F && rightWeight < 0.001F) return shot = HandTargets.EMPTY;
             // Remote positions use vanilla's tick interpolation; local grips use the simulation interval.
-            long sampleTime = relative ? frame - 50_000_000L + MovementRate.INTERVAL_NANOS : frame;
-            var l = left.position(sampleTime);
-            var r = right.position(sampleTime);
+            long interval = ClientMovement.INSTANCE.intervalNanos();
+            long sampleTime = relative ? frame - interval * MovementRate.STEPS_PER_GAME_TICK + interval : frame;
+            var l = left.position(sampleTime, interval);
+            var r = right.position(sampleTime, interval);
             return shot = l == null || r == null ? HandTargets.EMPTY : new HandTargets(l, r, leftWeight, rightWeight);
         }
     }

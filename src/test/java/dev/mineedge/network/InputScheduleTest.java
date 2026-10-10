@@ -1,11 +1,54 @@
 package dev.mineedge.network;
 
 import dev.mineedge.movement.MovementInput;
+import dev.mineedge.movement.MovementRate;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InputScheduleTest {
     private static final long MS = 1_000_000L;
+
+    @Test void scaledTransportKeepsHeldInputAliveAndAcknowledgesEverySimulationStep() {
+        for (float tickRate : new float[] {1, 5, 12.5F, 20, 40, 100}) {
+            var schedule = new InputSchedule();
+            var inbox = new CommandInbox();
+            long interval = MovementRate.intervalNanos(tickRate);
+            var held = new MovementInput(1, 1, 0, 0, false, false, false, false, false, 0, 0);
+            for (int step = 0; step < 80; step++) {
+                var input = held.withSequence(step + 1);
+                var payload = schedule.next(1, input, step * interval, interval);
+                if (step % InputSchedule.FULL_INTERVAL_STEPS == 0) {
+                    assertTrue(inbox.offer(assertInstanceOf(FullInputPayload.class, payload), step));
+                } else {
+                    assertNull(payload);
+                }
+                assertEquals(input, inbox.consumeSimulation(step, 5), "Held input expired at " + tickRate + " TPS");
+                assertEquals(step + 1, inbox.acknowledged());
+            }
+        }
+    }
+
+    @Test void rateChangesRefreshTheBaselineWithoutResettingTransportOrdering() {
+        var schedule = new InputSchedule();
+        var inbox = new CommandInbox();
+        var held = new MovementInput(1, 1, 0, 0, false, false, false, false, false, 0, 0);
+        long now = 0;
+        long updates = 0;
+        for (int step = 0; step < 120; step++) {
+            float tickRate = step < 18 ? 100 : step < 57 ? 5 : 40;
+            long interval = MovementRate.intervalNanos(tickRate);
+            var input = held.withSequence(step + 1);
+            var payload = schedule.next(1, input, now, interval);
+            if (payload != null) {
+                var full = assertInstanceOf(FullInputPayload.class, payload);
+                assertEquals(++updates, full.updateSequence());
+                assertTrue(inbox.offer(full, step));
+            }
+            if (step == 18 || step == 57) assertNotNull(payload, "Rate changes must immediately refresh the heartbeat");
+            assertEquals(input, inbox.consumeSimulation(step, 5));
+            now += interval;
+        }
+    }
 
     @Test void unchangedInputsSendOnlyOneFullPacketPerSecondAt20Hz() {
         var schedule = new InputSchedule();

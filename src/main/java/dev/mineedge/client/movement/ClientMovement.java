@@ -15,6 +15,7 @@ import dev.mineedge.integration.MovementSprint;
 import dev.mineedge.movement.MovementBody;
 import dev.mineedge.movement.MovementController;
 import dev.mineedge.movement.MovementInput;
+import dev.mineedge.movement.MovementRate;
 import dev.mineedge.movement.MovementState;
 import dev.mineedge.movement.MovementTuning;
 import dev.mineedge.movement.MovementVector;
@@ -67,6 +68,7 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
     private long serverTick = Long.MIN_VALUE;
     private long sessionTick = Long.MIN_VALUE;
     private SimulationLoop simulation;
+    private long intervalNanos = MovementRate.INTERVAL_NANOS;
     private boolean active;
     private boolean enabled;
     private final InputLatch buttons = new InputLatch();
@@ -103,6 +105,9 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
 
     public void clientTick(ClientTickEvent.Pre event) {
         Minecraft minecraft = Minecraft.getInstance();
+        float tickRate = minecraft.level == null ? MovementRate.GAME_TICK_HZ : minecraft.level.tickRateManager().tickrate();
+        intervalNanos = MovementRate.intervalNanos(tickRate);
+        if (simulation != null) simulation.setTickRate(tickRate);
         if (minecraft.screen != null || !minecraft.isWindowActive()) {
             buttons.interrupt();
             networkButtons.interrupt();
@@ -146,12 +151,12 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
             // All camera/model passes in this frame share exactly the same sample.
             long now = System.nanoTime();
             if (!minecraft.isPaused() || renderPosition == null) {
-                renderPosition = interpolation.position(now);
-                walkingShot = walking.sample(now);
-                capeShot = cape.sample(now);
+                renderPosition = interpolation.position(now, intervalNanos);
+                walkingShot = walking.sample(now, intervalNanos);
+                capeShot = cape.sample(now, intervalNanos);
             }
             handShot = hands.update(now, player.getXRot(), player.getYRot(),
-                    state.velocity().horizontalSpeed(), state.grounded(), minecraft.isPaused());
+                    state.velocity().horizontalSpeed(), state.grounded(), minecraft.isPaused(), intervalNanos);
         } else {
             renderPosition = null;
             handShot = null;
@@ -237,7 +242,7 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
             player.connection.send(new ServerboundCustomPayloadPacket(new FullInputPayload(epoch, input)));
         } else {
             publishInput(player, sequence);
-            var dispatch = outgoing.poll(System.nanoTime());
+            var dispatch = outgoing.poll(System.nanoTime(), intervalNanos);
             if (dispatch != null) dispatch.send();
         }
         MovementSprint.apply(player, input, state);
@@ -494,16 +499,20 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
     public long acknowledged() { return acknowledged; }
     public int pending() { return history.size(); }
     public double correction() { return correction; }
+    public long intervalNanos() { return intervalNanos; }
 
     private void startSimulation() {
-        simulation = new SimulationLoop(Minecraft.getInstance(), () -> {
+        Minecraft minecraft = Minecraft.getInstance();
+        float tickRate = minecraft.level == null ? MovementRate.GAME_TICK_HZ : minecraft.level.tickRateManager().tickrate();
+        intervalNanos = MovementRate.intervalNanos(tickRate);
+        simulation = new SimulationLoop(minecraft, () -> {
             try {
                 simulate();
             } catch (RuntimeException exception) {
                 MineEdge.LOGGER.error("Client movement simulation failed", exception);
                 if (active) requestReset();
             }
-        });
+        }, tickRate);
     }
 
     private ClientMovement() { startSimulation(); }
