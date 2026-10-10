@@ -26,6 +26,7 @@ public final class MovementSession {
     public ResourceLocation dimension;
     public boolean resumePending;
     public MovementTuning tuning;
+    public long tuningRevision;
     public MovementVector writtenVelocity = MovementVector.ZERO;
     public final SnapshotSchedule snapshots = new SnapshotSchedule();
 
@@ -41,6 +42,7 @@ public final class MovementSession {
         dimension = null;
         resumePending = false;
         tuning = null;
+        tuningRevision = 0;
         writtenVelocity = MovementVector.ZERO;
         simulationStep = 0;
     }

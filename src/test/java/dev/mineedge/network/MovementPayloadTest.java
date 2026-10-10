@@ -55,6 +55,24 @@ class MovementPayloadTest {
         return new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY, ConnectionType.NEOFORGE);
     }
 
+    @Test void tuningRevisionsRoundTripWithoutExpandingRoutineSnapshotsWithFullTuning() {
+        var state = new MovementState(MovementVector.ZERO, MovementVector.ZERO, MovementState.Mode.GROUND, 0, true, 0);
+        var tuning = new MovementTuning(1.5, 9, 12, 61.44, 1.536, 5, 0.4);
+        for (long revision : new long[] {0, 1, 128, 1L << 40}) {
+            var session = new SessionPayload(ResourceLocation.parse("minecraft:overworld"), 7, 100, true, true, tuning, revision);
+            var snapshot = new SnapshotPayload(7, 50, 100, state, Pose.STANDING, revision);
+            var buffer = buffer();
+            try {
+                SessionPayload.CODEC.encode(buffer, session);
+                assertEquals(session, SessionPayload.CODEC.decode(buffer));
+                SnapshotPayload.CODEC.encode(buffer, snapshot);
+                assertTrue(buffer.readableBytes() < 100, "Snapshots should only carry the compact tuning revision");
+                assertEquals(snapshot, SnapshotPayload.CODEC.decode(buffer));
+                assertEquals(0, buffer.readableBytes());
+            } finally { buffer.release(); }
+        }
+    }
+
     @Test void surfaceSnapshotsPreserveClimbStepsPathsAndSteepSlideRecovery() {
         var p = new MovementVector(2, 3, 4);
         var support = new CollisionBox(new MovementVector(1, 0, 5), new MovementVector(4, 5, 8));

@@ -97,7 +97,7 @@ public final class MovementRuntime {
         boolean eligible = MineEdgeServerConfig.enabledFor(player.gameMode.getGameModeForPlayer()) && MovementEligibility.supported(player)
                 && !awaitingTeleport(player);
         MovementTuning tuning = effectiveTuning(player);
-        if (session.active && (!eligible || !tuning.equals(session.tuning) || session.resetRequested)) {
+        if (session.active && (!eligible || session.resetRequested)) {
             resetSession(player, session);
         }
         if (eligible && !session.active) {
@@ -117,6 +117,12 @@ public final class MovementRuntime {
                     player.connection.getConnection().isMemoryConnection());
             session.input = MovementInput.idle(0, player.getYRot(), player.getXRot());
         } else if (session.active) {
+            // Attribute changes (aiming, potion effects, equipment) affect subsequent
+            // steps without discarding momentum, movement timers or queued commands.
+            if (!tuning.equals(session.tuning)) {
+                session.tuning = tuning;
+                session.tuningRevision++;
+            }
             // Import knockback/push changes before LivingEntity.aiStep's incidental damping.
             MovementVector impulse = MinecraftMotionAdapter.core(player.getDeltaMovement()).subtract(session.writtenVelocity);
             session.state = session.state.withVelocity(session.state.velocity().add(impulse.scale(20)));
@@ -204,11 +210,11 @@ public final class MovementRuntime {
         long tick = player.level().getGameTime();
         boolean enabled = MineEdgeServerConfig.enabledFor(player.gameMode.getGameModeForPlayer());
         var metadata = new SessionPayload(player.level().dimension().location(), session.epoch, tick,
-                enabled, session.active, snapshotTuning);
+                enabled, session.active, snapshotTuning, session.tuningRevision);
         if (session.snapshots.sessionDue(metadata)) {
             PacketDistributor.sendToPlayer(player, metadata);
         }
-        if (session.snapshots.due(tick, session.epoch, enabled,
+        if (session.snapshots.due(tick, session.epoch, session.tuningRevision, enabled,
                 session.active, session.state, player.getPose(), snapshotTuning, player.level().dimension().location(),
                 MineEdgeServerConfig.SNAPSHOT_INTERVAL_TICKS.get())) {
             PacketDistributor.sendToPlayer(player, SnapshotPayload.capture(player, session));

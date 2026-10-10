@@ -71,4 +71,19 @@ class SnapshotScheduleTest {
         assertTrue(schedule.sessionDue(new SessionPayload(DIMENSION, 3, 103, false, false, changed)));
         assertTrue(schedule.sessionDue(new SessionPayload(ResourceLocation.parse("minecraft:the_nether"), 3, 104, false, false, changed)));
     }
+
+    @Test void attributeTransitionsPublishMetadataAndBaselineWithoutChangingEpoch() {
+        var schedule = new SnapshotSchedule();
+        var slow = new MovementTuning(1.5, 7, 20, 61.44, 1.536, 5);
+        long epoch = 10;
+        for (int tick = 0; tick < 4; tick++) {
+            var tuning = tick == 1 ? slow : MovementTuning.DEFAULT;
+            var metadata = new SessionPayload(DIMENSION, epoch, tick, true, true, tuning, tick);
+            assertTrue(schedule.sessionDue(metadata));
+            assertTrue(schedule.due(tick, epoch, tick, true, true, GROUND, Pose.STANDING, tuning, DIMENSION, 20),
+                    "Tuning revisions must bypass the routine baseline interval, including a return to the same values");
+        }
+        assertFalse(schedule.sessionDue(new SessionPayload(DIMENSION, epoch, 4, true, true, MovementTuning.DEFAULT, 3)));
+        assertFalse(schedule.due(4, epoch, 3, true, true, GROUND, Pose.STANDING, MovementTuning.DEFAULT, DIMENSION, 20));
+    }
 }

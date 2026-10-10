@@ -16,6 +16,45 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PredictionReplayTest {
     @Test
+    void tuningChangesReplayPendingCommandsAndImpulsesEvenWhenAcknowledgedStateMatches() {
+        var controller = new MovementController();
+        var history = new CommandHistory();
+        var state = MovementControllerTest.grounded();
+        MovementState baseline = null;
+        var push = new MovementVector(2, 3, 0);
+        for (int sequence = 1; sequence <= 12; sequence++) {
+            var input = MovementControllerTest.forward(sequence);
+            var impulse = sequence == 8 ? push : MovementVector.ZERO;
+            assertTrue(history.add(input, impulse));
+            state = controller.step(state.withVelocity(state.velocity().add(impulse)), input,
+                    MovementTuning.DEFAULT, MovementControllerTest::floor, e -> {});
+            history.recordPrediction(sequence, state);
+            if (sequence == 4) baseline = state;
+        }
+        assertTrue(history.matches(4, baseline));
+        history.invalidatePredictions();
+        assertFalse(history.matches(4, baseline), "A matching baseline still needs replay after tuning changes");
+        assertEquals(12, history.size(), "Attribute updates must retain pending commands");
+        history.acknowledge(4);
+
+        var slow = new MovementTuning(1.5, 9, 12, 61.44, 1.536, 5);
+        for (var tuning : new MovementTuning[] {slow, MovementTuning.DEFAULT}) {
+            history.invalidatePredictions();
+            var expected = baseline;
+            for (int sequence = 5; sequence <= 12; sequence++) {
+                if (sequence == 8) expected = expected.withVelocity(expected.velocity().add(push));
+                expected = controller.step(expected, MovementControllerTest.forward(sequence), tuning,
+                        MovementControllerTest::floor, e -> {});
+            }
+            var replayed = history.replaySimulation(baseline, controller, tuning, MovementControllerTest::floor);
+            assertEquals(expected, replayed, "Replay must apply the current attributes and each pending impulse once");
+            assertTrue(history.matches(12, expected), "Replay must refresh the matching fast path");
+            assertEquals(8, history.size());
+            assertEquals(5, history.remaining().iterator().next().sequence());
+        }
+    }
+
+    @Test
     void localClockSkewAndStallsDoNotProducePredictionCorrections() {
         for (int burst : new int[]{1, 2, 5, 20}) {
             var controller = new MovementController();
@@ -198,7 +237,7 @@ class PredictionReplayTest {
     }
 
     @Test
-    void historyIsBoundedAndCanResetForNewEpochOrTuning() {
+    void historyIsBoundedAndCanResetForNewEpoch() {
         CommandHistory history = new CommandHistory();
         for (int tick = 1; tick <= CommandHistory.CAPACITY; tick++) {
             assertTrue(history.add(MovementControllerTest.forward(tick)));

@@ -34,7 +34,7 @@ public final class MovementNetwork {
     public static void register(RegisterPayloadHandlersEvent event) {
         // Payloads are required by default: NeoForge rejects connections missing
         // MineEdge on either side. Keep this registrar non-optional.
-        var registrar = event.registrar("33");
+        var registrar = event.registrar("34");
         var incoming = registrar.executesOn(HandlerThread.NETWORK);
         incoming.playToServer(FullInputPayload.TYPE, FullInputPayload.CODEC, (payload, context) -> {
             if (context.player() instanceof ServerPlayer player) {

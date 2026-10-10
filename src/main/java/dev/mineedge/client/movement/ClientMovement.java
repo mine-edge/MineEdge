@@ -62,6 +62,7 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
     private final PredictionImpulses impulses = new PredictionImpulses();
     private MovementInput input = MovementInput.idle(0, 0, 0);
     private long epoch;
+    private long tuningRevision;
     private long minimumEpoch;
     private long sequence;
     private long acknowledged;
@@ -288,8 +289,7 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
                 || owner == player && session.epoch() == epoch && session.serverTick() <= sessionTick) {
             return;
         }
-        boolean reset = owner != player || epoch != session.epoch() || !tuning.equals(session.tuning())
-                || active != session.active();
+        boolean reset = owner != player || epoch != session.epoch() || active != session.active();
         owner = player;
         dimension = session.dimension();
         enabled = session.enabled();
@@ -308,8 +308,13 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
             sprint.update(false);
             awaitingReset = false;
             suspended = false;
+        } else if (tuningRevision != session.tuningRevision()) {
+            // The next matching baseline must replay pending commands with the new
+            // authoritative tuning, even if its acknowledged state still matches.
+            history.invalidatePredictions();
         }
         epoch = session.epoch();
+        tuningRevision = session.tuningRevision();
         sessionTick = session.serverTick();
         active = session.active();
         tuning = session.tuning();
@@ -324,6 +329,9 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
     private void reconcile(SnapshotPayload snapshot) {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player == null || owner != player || !active || snapshot.epoch() != epoch
+                // Snapshots arrive on the network thread; tuning metadata is ordered
+                // on the game thread. Retain a newer baseline until its metadata arrives.
+                || snapshot.tuningRevision() != tuningRevision
                 || !player.level().dimension().location().equals(dimension)
                 || snapshot.epoch() < minimumEpoch || snapshot.serverTick() <= serverTick) return;
         boolean baseline = state == null;
