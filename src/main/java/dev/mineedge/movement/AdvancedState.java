@@ -4,10 +4,8 @@ import dev.mineedge.movement.collision.CollisionBox;
 import dev.mineedge.movement.traversal.TraversalPath;
 
 /** Phase 8 transient state. Included in every authoritative snapshot, never saved to disk. */
-public record AdvancedState(boolean coiled, boolean turnedInAir,
-                            boolean wallTurned, Turn turn, LedgeMove ledge, Springboard spring,
-                            double getUpTime, boolean backRoll) {
-    public static final AdvancedState EMPTY = new AdvancedState(false, false, false, null, null, null, -1, false);
+public record AdvancedState(boolean coiled, boolean wallTurned, Turn turn, LedgeMove ledge, Springboard spring) {
+    public static final AdvancedState EMPTY = new AdvancedState(false, false, null, null, null);
     public record Turn(float from, float delta, double elapsed, double duration) {
         public float yaw() { double k = Math.clamp(elapsed / duration, 0, 1); return from + delta * (float) (k * k * (3 - 2 * k)); }
         public boolean active() { return elapsed + 1.0E-9 < duration; }
@@ -36,13 +34,12 @@ public record AdvancedState(boolean coiled, boolean turnedInAir,
     public record Springboard(TraversalPath path, double speed, double elapsed) {}
     public AdvancedState advance(double dt) {
         return new AdvancedState(coiled,
-                turnedInAir, wallTurned, turn == null ? null : new Turn(turn.from, turn.delta, Math.min(turn.duration, turn.elapsed + dt), turn.duration),
-                ledge, spring, getUpTime, backRoll);
+                wallTurned, turn == null ? null : new Turn(turn.from, turn.delta, Math.min(turn.duration, turn.elapsed + dt), turn.duration),
+                ledge, spring);
     }
-    public AdvancedState coil(boolean value) { return new AdvancedState(value, turnedInAir, wallTurned, turn, ledge, spring, getUpTime, backRoll); }
-    public AdvancedState turn(Turn value, boolean air, boolean wall) { return new AdvancedState(coiled, air, wall, value, ledge, spring, getUpTime, backRoll); }
-    public AdvancedState ledge(LedgeMove value) { return new AdvancedState(coiled, turnedInAir, wallTurned, turn, value, spring, getUpTime, backRoll); }
-    public AdvancedState spring(Springboard value) { return new AdvancedState(coiled, turnedInAir, wallTurned, turn, ledge, value, getUpTime, backRoll); }
-    public AdvancedState recovery(double elapsed, boolean back) { return new AdvancedState(false, false, false, null, null, null, elapsed, back); }
-    public AdvancedState landed() { return new AdvancedState(false, false, false, turn, null, null, -1, false); }
+    public AdvancedState coil(boolean value) { return new AdvancedState(value, wallTurned, turn, ledge, spring); }
+    public AdvancedState turn(Turn value, boolean wall) { return new AdvancedState(coiled, wall, value, ledge, spring); }
+    public AdvancedState ledge(LedgeMove value) { return new AdvancedState(coiled, wallTurned, turn, value, spring); }
+    public AdvancedState spring(Springboard value) { return new AdvancedState(coiled, wallTurned, turn, ledge, value); }
+    public AdvancedState landed() { return new AdvancedState(false, false, turn, null, null); }
 }

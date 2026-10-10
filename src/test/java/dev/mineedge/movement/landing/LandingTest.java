@@ -92,6 +92,18 @@ class LandingTest {
         assertFalse(events.contains(MovementEvent.ROLL_START));
     }
 
+    @Test void airTurnStillAllowsTimedRollsAndNormalHardLandings() {
+        for (boolean roll : new boolean[]{false, true}) {
+            events.clear();
+            var command = new MovementInput(1, 1, 0, 0, false, false, roll, roll, true, 0, 0, true);
+            var state = tick(imminent(6, LandingState.Source.JUMP), new World(FLOOR), command);
+            assertTrue(events.contains(MovementEvent.TURN));
+            assertEquals(roll ? MovementState.Mode.ROLL : MovementState.Mode.HARD_LANDING, state.mode());
+            assertTrue(events.contains(roll ? MovementEvent.ROLL_START : MovementEvent.HARD_LAND));
+            assertEquals(6, state.landing().distance(), 1.0E-9);
+        }
+    }
+
     @Test void rollWindowAndRetriggerBoundariesAreSimulationTime() {
         var feet = MovementVector.ZERO;
         var state = new LandingState(6, 6, 0, LandingState.Source.OTHER, 0, 0.199, 0.6, true);

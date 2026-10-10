@@ -16,7 +16,6 @@ public final class LandingController {
     public static final double ROLL_TIME = 0.5, RECOVERY_TIME = 1.8, SPEED_REDUCTION = 0.65;
     public static final double SOFT_RECOVERY_TIME = 1.5;
     public static final double HARD_SPEED_MODIFIER = 0.5;
-    public static final double BACK_GET_UP_DELAY = 0.3, BACK_GET_UP_TIME = 0.5;
     public record Result(LandingState state, MovementVector velocity, MovementState.Mode mode, MovementBody body) {}
 
     public static boolean locked(MovementState.Mode mode) {
@@ -25,7 +24,7 @@ public final class LandingController {
 
     /** Shared exact-contact test, also used before vanilla damage callbacks on the server. */
     public static boolean canRoll(LandingState state, MovementVector feet, double impact, boolean clearance) {
-        return state.airborne() && state.source() != LandingState.Source.TRAVERSAL && state.source() != LandingState.Source.BACK_TURN && impact > 0
+        return state.airborne() && state.source() != LandingState.Source.TRAVERSAL && impact > 0
                 && state.apex() - feet.y() + 1.0E-9 >= ROLL_HEIGHT
                 && state.triggerAge() < WINDOW - 1.0E-9 && clearance;
     }
@@ -40,12 +39,7 @@ public final class LandingController {
         boolean ordinary = state.source() != LandingState.Source.TRAVERSAL && velocity.y() <= 0;
         boolean roll = ordinary && canRoll(state, feet, impact, resolver.canOccupy(feet, MovementBody.LOW));
         MovementState.Mode mode = MovementState.Mode.GROUND;
-        if (ordinary && state.source() == LandingState.Source.BACK_TURN) {
-            velocity = MovementVector.ZERO;
-            mode = MovementState.Mode.BACK_LANDING;
-            body = MovementBody.LOW;
-            events.accept(MovementEvent.LAND_ON_BACK);
-        } else if (roll) {
+        if (roll) {
             MovementVector horizontal = new MovementVector(velocity.x(), 0, velocity.z());
             MovementVector direction = horizontal.length() > 1.0E-9 ? horizontal.normalized() : input.forwardDirection();
             velocity = direction.scale(Math.max(horizontal.length(), tuning.walkSpeed()));

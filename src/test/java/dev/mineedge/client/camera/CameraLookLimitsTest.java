@@ -99,7 +99,7 @@ class CameraLookLimitsTest {
         var wall = WallState.EMPTY.contact(new MovementVector(0, 0, -1), null, MovementVector.ZERO, MovementVector.ZERO, true, 0);
         var state = state(MovementState.Mode.WALLCLIMB, TraversalState.EMPTY, wall, AdvancedState.EMPTY, SurfaceState.EMPTY);
         assertEquals(90, CameraLookLimits.yaw(state, 120));
-        var turn = AdvancedState.EMPTY.turn(new AdvancedState.Turn(0, 180, 0.1, 0.2), false, false);
+        var turn = AdvancedState.EMPTY.turn(new AdvancedState.Turn(0, 180, 0.1, 0.2), false);
         var turning = state(MovementState.Mode.WALLCLIMB_TURNED, TraversalState.EMPTY, wall, turn, SurfaceState.EMPTY);
         assertFalse(CameraLookLimits.restricted(turning));
         assertEquals(140, CameraLookLimits.yaw(turning, 140));

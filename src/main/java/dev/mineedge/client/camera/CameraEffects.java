@@ -25,7 +25,7 @@ public final class CameraEffects {
                 kick.impulse(Math.clamp(impact * 0.06, 0, 1.2));
                 trauma = Math.min(1, trauma + Math.clamp((impact - 5) * 0.05, 0, 0.35));
             }
-            case HARD_LAND, LAND_ON_BACK -> { dip.impulse(-2.4); kick.impulse(3); trauma = 0.8; }
+            case HARD_LAND -> { dip.impulse(-2.4); kick.impulse(3); trauma = 0.8; }
             case SOFT_LAND -> { dip.impulse(-0.6); kick.impulse(0.6); trauma = Math.min(1, trauma + 0.15); }
             case LEDGE_GRAB -> { dip.impulse(-1); trauma = Math.min(1, trauma + 0.35); }
             case ROLL_START, WALL_JUMP, SLIDE_START, WALL_KICK, SPRINGBOARD_START, STEEP_SLIDE_START -> trauma = Math.min(1, trauma + 0.18);
@@ -38,7 +38,7 @@ public final class CameraEffects {
                 actionPitch.impulse(24); actionDip.impulse(-0.5);
             }
             case SLIDE_START, STEEP_SLIDE_START, COIL_START -> actionPitch.impulse(18);
-            case ROLL_START, BACK_ROLL -> { actionPitch.impulse(42); actionRoll.impulse(-32); }
+            case ROLL_START -> { actionPitch.impulse(42); actionRoll.impulse(-32); }
             case TURN, WALLRUN_TURN, SHIMMY_CORNER -> actionRoll.impulse(24);
             case SPRINGBOARD_START -> { actionPitch.impulse(-30); actionDip.impulse(-0.7); }
             case LEDGE_GRAB, LADDER_GRAB, PIPE_GRAB -> actionPitch.impulse(16);

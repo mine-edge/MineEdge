@@ -87,7 +87,7 @@ class AdvancedMovesTest {
         var p = new MovementVector(0, 0.15, 0);
         var s = new MovementState(p, new MovementVector(0, -0.1, 1), MovementState.Mode.AIR, 0, false, 0,
                 LocomotionState.EMPTY, BlockMotionState.EMPTY, MovementBody.CROUCHING, 0, TraversalState.EMPTY, WallState.EMPTY.jump(p), LandingState.capture(p, false, 0));
-        s = advanced(s, new AdvancedState(true, false, false, null, null, null, -1, false));
+        s = advanced(s, new AdvancedState(true, false, null, null, null));
         s = tick(s, world, input(1, 0, 0, false, false, false, 0));
         assertTrue(s.advanced().coiled());
     }
@@ -97,44 +97,26 @@ class AdvancedMovesTest {
         assertEquals(180, Math.abs(world.yaw), 0.001);
         assertEquals(1, events.stream().filter(e -> e == MovementEvent.TURN).count());
     }
-    @Test void airTurnLandsOnBackAndRequiresGetUpInput() {
+    @Test void airTurnLandsNormallyAndAllowsImmediateWalkingAndJumping() {
         var world = new World(FLOOR);
         var s = tick(ground(), world, input(1, 1, 0, true, false, false, 0));
         s = tick(s, world, input(2, 0, 0, false, false, true, 0));
-        assertTrue(s.advanced().turnedInAir());
-        for (int i = 3; i < 35; i++) s = tick(s, world, input(i, 0, 0, false, false, false, world.yaw));
-        assertEquals(MovementState.Mode.BACK_LANDING, s.mode()); assertEquals(MovementBody.LOW, s.body());
-        for (int i = 35; i < 80; i++) s = tick(s, world, input(i, 1, 0, false, false, false, world.yaw));
-        assertEquals(MovementState.Mode.GROUND, s.mode()); assertTrue(events.contains(MovementEvent.LAND_ON_BACK));
-    }
-    @Test void backRollDisplacementIsSweptAgainstWalls() {
-        var world = new World(FLOOR, box(-3, 0, -2, 3, 3, -1));
-        var s = new MovementState(MovementVector.ZERO, MovementVector.ZERO, MovementState.Mode.BACK_LANDING, 0, true, 0,
-                LocomotionState.EMPTY, BlockMotionState.EMPTY, MovementBody.LOW, 0);
-        for (int i = 1; i < 25; i++) s = tick(s, world, input(i, -1, 0, false, false, false, 0));
-        assertTrue(events.contains(MovementEvent.BACK_ROLL)); assertTrue(s.position().z() >= -0.7 - 1.0E-5);
-        assertEquals(MovementState.Mode.GROUND, s.mode());
-    }
-    @Test void airTurnBackLandingRecoversQuicklyWithForwardOrJumpWithoutAnotherLaunch() {
-        for (boolean jump : new boolean[]{false, true}) {
-            events.clear(); var world = new World(FLOOR);
-            var s = tick(ground(), world, input(1, 1, 0, true, false, false, 0));
-            s = tick(s, world, input(2, 0, 0, false, false, true, 0));
-            int sequence = 3;
-            while (s.mode() != MovementState.Mode.BACK_LANDING && sequence < 35)
-                s = tick(s, world, input(sequence++, 0, 0, false, false, false, world.yaw));
-            assertEquals(MovementState.Mode.BACK_LANDING, s.mode());
-            int ticks = 0;
-            while (s.mode() == MovementState.Mode.BACK_LANDING && ticks < 18) {
-                s = tick(s, world, input(sequence++, jump ? 0 : 1, 0, jump && ticks == 0, false, false, world.yaw));
-                ticks++;
-            }
-            assertEquals(MovementState.Mode.GROUND, s.mode()); assertEquals(MovementBody.STANDING, s.body());
-            assertTrue(ticks <= (jump ? 11 : 17), "Back landing recovery took too long");
-            assertEquals(1, events.stream().filter(e -> e == MovementEvent.LAND_ON_BACK).count());
-            assertEquals(1, events.stream().filter(e -> e == MovementEvent.LANDING_RECOVERED).count());
-            assertEquals(1, events.stream().filter(e -> e == MovementEvent.JUMP).count(), "Get-up input launched another jump");
-        }
+        assertEquals(LandingState.Source.JUMP, s.landing().source());
+        int sequence = 3;
+        while (!s.grounded() && sequence < 35)
+            s = tick(s, world, input(sequence++, 0, 0, false, false, false, world.yaw));
+        assertEquals(MovementState.Mode.GROUND, s.mode()); assertEquals(MovementBody.STANDING, s.body());
+        assertEquals(180, Math.abs(world.yaw), 0.001);
+        assertTrue(events.containsAll(List.of(MovementEvent.TURN, MovementEvent.LAND)));
+        assertFalse(events.contains(MovementEvent.LANDING_RECOVERED));
+        var idle = controller.tick(s, input(sequence, 0, 0, false, false, false, world.yaw),
+                MovementTuning.DEFAULT, new World(FLOOR), e -> {});
+        s = tick(s, world, input(sequence++, 1, 0, false, false, false, world.yaw));
+        assertTrue(s.position().subtract(idle.position()).dot(new MovementVector(0, 0, -1)) > 0,
+                "Walking input was blocked after landing");
+        s = tick(s, world, input(sequence, 1, 0, true, false, false, world.yaw));
+        assertEquals(MovementState.Mode.AIR, s.mode()); assertTrue(s.velocity().y() > 0);
+        assertEquals(2, events.stream().filter(e -> e == MovementEvent.JUMP).count());
     }
     @Test void shimmyFinishesStepAfterReleaseAndStopsAtObstructions() {
         var ledge = box(-4, 0, 1, 4, 3, 5); var world = new World(ledge);

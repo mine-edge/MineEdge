@@ -96,16 +96,16 @@ class MovementPayloadTest {
         }
     }
 
-    @Test void advancedSnapshotsPreserveTurnsLedgePathsSpringboardsAndRecovery() {
+    @Test void advancedSnapshotsPreserveTurnsLedgePathsAndSpringboards() {
         var p = new MovementVector(2, 3, 4);
         var shape = new CollisionBox(new MovementVector(1, 0, 5), new MovementVector(4, 5, 8));
         for (var kind : AdvancedState.LedgeKind.values()) {
             var path = new TraversalPath(VaultType.SPRINGBOARD, p, p.add(new MovementVector(0, 2, 0)),
                     p.add(new MovementVector(0, 2, 2)), p.add(new MovementVector(0, 1, 2)), new MovementVector(0, 9.5, 5), shape, shape);
-            var advanced = new AdvancedState(true, true, true, new AdvancedState.Turn(179, 180, 0.125, 0.2),
+            var advanced = new AdvancedState(true, true, new AdvancedState.Turn(179, 180, 0.125, 0.2),
                     new AdvancedState.LedgeMove(kind, p, p.add(new MovementVector(1, 0, 0)), p.add(new MovementVector(1, 1, 0)),
                             new MovementVector(0, 0, -1), shape, shape, 0.25, 1.07, 179, 90),
-                    new AdvancedState.Springboard(path, 6.5, 0.3), 0.41, true);
+                    new AdvancedState.Springboard(path, 6.5, 0.3));
             var s = new MovementState(p, new MovementVector(0, 0, 6), MovementState.Mode.LEDGE_HANG, 1, false, 0,
                     LocomotionState.EMPTY, BlockMotionState.EMPTY, MovementBody.CROUCHING, 0, TraversalState.EMPTY,
                     WallState.EMPTY, LandingState.capture(p, false, 0), advanced);
