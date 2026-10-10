@@ -1,7 +1,6 @@
 ## MineEdge - Mirror's Edge inspired movement for Minecraft.
 
-This mod replaces vanilla movement with one that adds parkour mechanics into the game.
-
+This mod replaces vanilla movement with one that adds parkour mechanics into the game.  
 MineEdge also provides first person camera movement and thirdperson player animations.
 
 ### Current features:
