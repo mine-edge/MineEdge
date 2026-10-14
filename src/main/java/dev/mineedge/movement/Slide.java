@@ -13,7 +13,7 @@ public final class Slide {
     public record Step(MovementVector horizontal, float yaw, boolean exit) {}
 
     public static boolean canStart(MovementVector velocity, MovementInput input, MovementTuning tuning) {
-        return tuning.features().sliding() && input.sprintHeld() && velocity.horizontalSpeed() > 0
+        return tuning.features().sliding() && velocity.horizontalSpeed() > 0
                 && velocity.dot(input.forwardDirection()) >= MIN_SPEED * tuning.walkSpeed() / 4;
     }
 

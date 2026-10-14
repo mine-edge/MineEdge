@@ -28,7 +28,7 @@ public final class MovementSounds {
             return;
         }
         var sound = switch (event) {
-            case SLIDE_START, ROLL_START, BACK_ROLL -> SoundEvents.PLAYER_ATTACK_SWEEP;
+            case SLIDE_START, ROLL_START -> SoundEvents.PLAYER_ATTACK_SWEEP;
             case LEDGE_GRAB, WALL_JUMP, WALL_KICK, SPRINGBOARD_START -> SoundEvents.PLAYER_SMALL_FALL;
             default -> null;
         };

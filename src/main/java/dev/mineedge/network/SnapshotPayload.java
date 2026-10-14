@@ -13,8 +13,12 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Pose;
 
 /** Complete lossless replay state within an epoch; session metadata travels separately. */
-public record SnapshotPayload(long epoch, long acknowledged, long serverTick, MovementState state, Pose pose)
+public record SnapshotPayload(long epoch, long acknowledged, long serverTick, MovementState state, Pose pose, long tuningRevision)
         implements CustomPacketPayload {
+    public SnapshotPayload(long epoch, long acknowledged, long serverTick, MovementState state, Pose pose) {
+        this(epoch, acknowledged, serverTick, state, pose, 0);
+    }
+
     public static final Type<SnapshotPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(MineEdge.MOD_ID, "snapshot"));
     private static final Pose[] POSES = Pose.values();
     public static final StreamCodec<RegistryFriendlyByteBuf, SnapshotPayload> CODEC = StreamCodec.of(
@@ -22,10 +26,14 @@ public record SnapshotPayload(long epoch, long acknowledged, long serverTick, Mo
                 buffer.writeVarLong(payload.epoch);
                 buffer.writeVarLong(payload.acknowledged);
                 buffer.writeVarLong(payload.serverTick);
+                buffer.writeVarLong(payload.tuningRevision);
                 MovementStateCodec.CODEC.encode(buffer, payload.state);
                 buffer.writeEnum(payload.pose);
-            }, buffer -> new SnapshotPayload(buffer.readVarLong(), buffer.readVarLong(),
-                    buffer.readVarLong(), MovementStateCodec.CODEC.decode(buffer), POSES[buffer.readVarInt()]));
+            }, buffer -> {
+                long epoch = buffer.readVarLong(), acknowledged = buffer.readVarLong();
+                long tick = buffer.readVarLong(), revision = buffer.readVarLong();
+                return new SnapshotPayload(epoch, acknowledged, tick, MovementStateCodec.CODEC.decode(buffer), POSES[buffer.readVarInt()], revision);
+            });
 
     public static SnapshotPayload capture(ServerPlayer player, MovementSession session) {
         MovementState state = session.state;
@@ -37,7 +45,7 @@ public record SnapshotPayload(long epoch, long acknowledged, long serverTick, Mo
             }
         }
         return new SnapshotPayload(session.epoch, session.inbox.acknowledged(),
-                player.level().getGameTime(), state, player.getPose());
+                player.level().getGameTime(), state, player.getPose(), session.tuningRevision);
     }
 
     @Override

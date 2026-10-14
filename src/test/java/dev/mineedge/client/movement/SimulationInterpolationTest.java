@@ -10,6 +10,19 @@ class SimulationInterpolationTest {
     private static final long MS = 1_000_000L;
     private static MovementVector at(double x) { return new MovementVector(x, 0, 0); }
 
+    @Test void scaledSimulationIntervalsRenderContinuouslyAtSlowAndFastTickRates() {
+        for (float tickRate : new float[] {1, 5, 20, 80}) {
+            var interpolation = new SimulationInterpolation();
+            long interval = MovementRate.intervalNanos(tickRate);
+            interpolation.reset(at(0), 0);
+            for (int frame = 0; frame <= 160; frame++) {
+                long now = frame * interval / 4;
+                if (frame > 0 && frame % 4 == 0) interpolation.record(at(frame * 0.05), now);
+                assertEquals(Math.max(0, frame - 4) * 0.05, interpolation.position(now, interval).x(), 1.0E-12);
+            }
+        }
+    }
+
     @Test void twentyHertzSnapshotsRenderContinuouslyAcrossNativeTickBoundaries() {
         var interpolation = new SimulationInterpolation();
         interpolation.reset(at(0), 0);

@@ -350,6 +350,11 @@ public final class SurfaceGameTests {
         h.assertTrue(result.state.mode() == MovementState.Mode.GROUND && result.state.body() == MovementBody.STANDING,
                 "Steep reaction did not restore ordinary movement");
         h.assertTrue(Math.abs(result.state.position().y() - p(h, 0, 1, 0).y()) < 1.0E-6, "Steep reaction did not reach the flat floor");
+        var jumping = compare(h, initial, 2, (n, s) -> input(n, 0, n == 1, false));
+        h.assertTrue(jumping.events.containsAll(List.of(MovementEvent.STEEP_SLIDE_START, MovementEvent.STEEP_SLIDE_END, MovementEvent.JUMP)),
+                "Tagged descending ice did not allow jumping from a slide");
+        h.assertTrue(jumping.state.mode() == MovementState.Mode.AIR && jumping.state.velocity().y() > 0,
+                "Steep slide jump did not launch into the air");
         h.succeed();
     }
 

@@ -8,6 +8,10 @@ import dev.mineedge.integration.MinecraftMotionAdapter;
 import dev.mineedge.integration.MovementPoses;
 import dev.mineedge.integration.MovementRuntime;
 import dev.mineedge.movement.MovementBody;
+import dev.mineedge.movement.LocomotionState;
+import dev.mineedge.movement.MovementInput;
+import dev.mineedge.movement.MovementController;
+import dev.mineedge.movement.MovementState;
 import dev.mineedge.movement.MovementVector;
 import java.util.List;
 import java.util.Map;
@@ -17,8 +21,16 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.ConnectionProtocol;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.util.FakePlayer;
@@ -115,12 +127,136 @@ public final class CompatibilityGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void temporaryAttributesPreserveSessionMomentumTimersAndQueuedInputs(GameTestHelper helper) {
+        var player = player(helper);
+        var session = MovementRuntime.session(player);
+        var id = ResourceLocation.fromNamespaceAndPath(MineEdge.MOD_ID, "test_aim_slowdown");
+        var speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+        try {
+            player.setOnGround(true);
+            var captured = MinecraftMotionAdapter.capture(player);
+            var state = new MovementState(captured.position(), new MovementVector(0, 0, 6), MovementState.Mode.SLIDE,
+                    0.35, true, 4.5F, new LocomotionState(2.4, 1.5, 0.2, 0.1, 179, true),
+                    captured.blocks(), MovementBody.LOW, 179);
+            MinecraftMotionAdapter.apply(player, state);
+            session.active = true;
+            session.state = state;
+            session.tuning = MovementRuntime.effectiveTuning(player);
+            session.writtenVelocity = state.velocity().scale(1.0 / 20);
+            session.simulationStep = 73;
+            session.input = new MovementInput(1, 1, 0, 0, false, false, true, false, false, 179, 0);
+            session.inbox.offer(session.input, 73);
+            session.inbox.consumeSimulation(73, 5);
+            session.inbox.offer(session.input.withSequence(2), 74);
+            MovementRuntime.beforeTick(new PlayerTickEvent.Pre(player));
+            var clock = session.simulation;
+            var inbox = session.inbox;
+            long epoch = session.epoch;
+            var originalTuning = session.tuning;
+            double walkSpeed = originalTuning.walkSpeed();
+
+            for (double factor : new double[] {0.35, 0, 0.6, 1}) {
+                speed.removeModifier(id);
+                if (factor != 1) speed.addTransientModifier(new AttributeModifier(id, factor - 1, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+                long revision = session.tuningRevision;
+                MovementRuntime.beforeTick(new PlayerTickEvent.Pre(player));
+                helper.assertTrue(session.active && session.epoch == epoch && session.simulation == clock,
+                        "Attribute change restarted the movement session or its clock");
+                helper.assertTrue(session.state.equals(state), "Attribute change discarded momentum, pose, fall history or timers");
+                helper.assertTrue(session.inbox == inbox && inbox.size() == 1 && inbox.acknowledged() == 1
+                                && session.input.sequence() == 1 && session.simulationStep == 73,
+                        "Attribute change discarded held/queued inputs or sequence bookkeeping");
+                helper.assertTrue(Math.abs(session.tuning.walkSpeed() - walkSpeed * factor) < 1.0E-9,
+                        "Temporary slowdown did not reach effective tuning");
+                helper.assertTrue(session.tuningRevision == revision + 1, "Attribute change did not advance its tuning revision");
+                MovementRuntime.beforeTick(new PlayerTickEvent.Pre(player));
+                helper.assertTrue(session.tuningRevision == revision + 1, "Unchanged attributes advanced the tuning revision");
+            }
+
+            for (var attribute : List.of(Attributes.JUMP_STRENGTH, Attributes.GRAVITY, Attributes.SNEAKING_SPEED)) {
+                player.getAttribute(attribute).addTransientModifier(new AttributeModifier(id, 0.5, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+            }
+            MovementRuntime.beforeTick(new PlayerTickEvent.Pre(player));
+            helper.assertTrue(Math.abs(session.tuning.jumpSpeed() - originalTuning.jumpSpeed() * 1.5) < 1.0E-6
+                            && Math.abs(session.tuning.gravity() - originalTuning.gravity() * 1.5) < 1.0E-6
+                            && Math.abs(session.tuning.crouchSpeedModifier() - originalTuning.crouchSpeedModifier() * 1.5) < 1.0E-6,
+                    "Jump, gravity or sneaking attribute changes did not reach the active simulation");
+            helper.assertTrue(session.epoch == epoch && session.state.equals(state) && session.inbox == inbox && inbox.size() == 1,
+                    "Non-speed attribute changes discarded the active state or commands");
+            for (var attribute : List.of(Attributes.JUMP_STRENGTH, Attributes.GRAVITY, Attributes.SNEAKING_SPEED)) {
+                player.getAttribute(attribute).removeModifier(id);
+            }
+
+            session.resetRequested = true;
+            MovementRuntime.beforeTick(new PlayerTickEvent.Pre(player));
+            helper.assertTrue(session.epoch != epoch && session.inbox != inbox && session.tuningRevision == 0,
+                    "Explicit lifecycle resets stopped invalidating stale commands");
+        } finally {
+            speed.removeModifier(id);
+            for (var attribute : List.of(Attributes.JUMP_STRENGTH, Attributes.GRAVITY, Attributes.SNEAKING_SPEED)) {
+                player.getAttribute(attribute).removeModifier(id);
+            }
+            session.reset();
+            player.discard();
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void serverSprintSetterVetoChangesAuthoritativePhysics(GameTestHelper helper) throws ReflectiveOperationException {
+        var simulate = MovementRuntime.class.getDeclaredMethod("simulate", ServerPlayer.class, dev.mineedge.integration.MovementSession.class);
+        simulate.setAccessible(true);
+        var controller = new MovementController();
+        for (boolean veto : new boolean[] {false, true}) {
+            var player = player(helper, veto);
+            var connection = new Connection(PacketFlow.SERVERBOUND) {
+                @Override public boolean isConnected() { return true; }
+            };
+            player.connection = new ServerGamePacketListenerImpl(helper.getLevel().getServer(), connection, player,
+                    CommonListenerCookie.createInitial(player.getGameProfile(), false)) {
+                @Override public void send(Packet<?> packet) {}
+            };
+            helper.getLevel().addFreshEntity(player);
+            var session = MovementRuntime.session(player);
+            try {
+                player.setOnGround(true);
+                session.active = true;
+                session.state = MinecraftMotionAdapter.capture(player);
+                session.tuning = MovementRuntime.effectiveTuning(player);
+                var expected = session.state;
+                for (int sequence = 1; sequence <= 30; sequence++) {
+                    var input = new MovementInput(sequence, 1, 0, 0, false, false, false, false, true, 0, 0);
+                    session.inbox.offer(input, session.simulationStep);
+                    expected = controller.step(expected, input.withSprint(!veto), session.tuning,
+                            MinecraftMotionAdapter.replay(player), event -> {});
+                    simulate.invoke(null, player, session);
+                    helper.assertTrue(session.active && session.input.sprintHeld() == !veto && player.isSprinting() == !veto,
+                            "Server simulation ignored the sprint setter's final decision");
+                    helper.assertTrue(session.state.position().subtract(expected.position()).length() < 1.0E-6
+                                    && session.state.velocity().subtract(expected.velocity()).length() < 1.0E-6,
+                            "Native sprint flag and authoritative acceleration disagreed");
+                }
+            } finally {
+                session.reset();
+                player.discard();
+            }
+        }
+        helper.succeed();
+    }
+
     private static FakePlayer player(GameTestHelper helper) {
+        return player(helper, false);
+    }
+
+    private static FakePlayer player(GameTestHelper helper, boolean vetoSprint) {
         for (int x = 1; x <= 13; x++) for (int z = 1; z <= 13; z++) helper.setBlock(new BlockPos(x, 0, z), Blocks.STONE);
         var origin = helper.absolutePos(new BlockPos(7, 1, 7));
         for (int x = (origin.getX() >> 4) - 2; x <= (origin.getX() >> 4) + 2; x++)
             for (int z = (origin.getZ() >> 4) - 2; z <= (origin.getZ() >> 4) + 2; z++) helper.getLevel().getChunk(x, z);
-        var player = new FakePlayer(helper.getLevel(), new GameProfile(UUID.randomUUID(), "MineEdgeCompat"));
+        var player = new FakePlayer(helper.getLevel(), new GameProfile(UUID.randomUUID(), "MineEdgeCompat")) {
+            @Override public void setSprinting(boolean sprinting) { super.setSprinting(sprinting && !vetoSprint); }
+        };
         player.setPos(Vec3.atLowerCornerOf(origin).add(0.5, 0, 0.5));
         return player;
     }

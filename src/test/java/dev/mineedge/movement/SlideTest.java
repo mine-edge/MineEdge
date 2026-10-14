@@ -3,6 +3,7 @@ package dev.mineedge.movement;
 import dev.mineedge.movement.collision.BoxWorld;
 import dev.mineedge.movement.collision.CollisionBox;
 import dev.mineedge.movement.collision.CollisionMover;
+import dev.mineedge.movement.landing.LandingState;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -111,22 +112,38 @@ class SlideTest {
     }
 
     @Test
-    void slideEntryRequiresSprintEvenWithEnoughForwardMomentum() {
+    void slideEntryUsesForwardMomentumWithOrWithoutSprint() {
         World world = new World();
         var crouch = input(1, true, true, false, 0, 1, 0);
         for (double speed : new double[]{4, 6}) {
             events.clear();
             var start = moving().withVelocity(new MovementVector(0, 0, speed));
             var walking = tick(start, crouch.withSprint(false), world);
-            assertEquals(MovementState.Mode.GROUND, walking.mode());
-            assertEquals(MovementBody.CROUCHING, walking.body());
-            assertFalse(events.contains(MovementEvent.SLIDE_START));
+            assertEquals(MovementState.Mode.SLIDE, walking.mode());
+            assertEquals(MovementBody.LOW, walking.body());
+            assertEquals(List.of(MovementEvent.SLIDE_START), events);
+            var replay = controller.tick(start, crouch.withSprint(false), MovementTuning.DEFAULT, new World(), event -> {});
+            assertEquals(walking, replay);
+            events.clear();
             var sprinting = tick(start, crouch, world);
             assertEquals(MovementState.Mode.SLIDE, sprinting.mode());
             assertTrue(events.contains(MovementEvent.SLIDE_START));
             var continuing = tick(sprinting, input(2, true, false, false, 0, 1, 0).withSprint(false), world);
             assertEquals(MovementState.Mode.SLIDE, continuing.mode());
         }
+    }
+
+    @Test
+    void walkingRunUpCanStartASlideWithoutSprint() {
+        World world = new World();
+        var state = MovementControllerTest.grounded();
+        for (int n = 1; n <= 20; n++)
+            state = tick(state, input(n, false, false, false, 0, 1, 0).withSprint(false), world);
+        assertEquals(MovementTuning.DEFAULT.walkSpeed(), state.velocity().horizontalSpeed(), 0.01);
+        state = tick(state, input(21, true, true, false, 0, 1, 0).withSprint(false), world);
+        assertEquals(MovementState.Mode.SLIDE, state.mode());
+        assertEquals(MovementBody.LOW, state.body());
+        assertEquals(List.of(MovementEvent.SLIDE_START), events);
     }
 
     @Test
@@ -153,13 +170,15 @@ class SlideTest {
             assertEquals(1, events.stream().filter(e -> e == MovementEvent.SLIDE_START).count());
             assertEquals(1, events.stream().filter(e -> e == MovementEvent.JUMP).count());
             state = tick(state, input(51, false, false, true, 0, 1, 0), world);
-            assertEquals(MovementState.Mode.SLIDE, state.mode(), "Landing slide did not get its minimum duration");
+            assertEquals(MovementState.Mode.AIR, state.mode(), "Jump did not interrupt the landing slide");
+            assertTrue(state.velocity().y() > 0);
+            assertEquals(2, events.stream().filter(e -> e == MovementEvent.JUMP).count());
             assertEquals(0, state.locomotion().jumpBuffer());
         }
     }
 
     @Test
-    void jumpLandingSlideRequiresSprintHeldCrouchAndRunUpMomentum() {
+    void jumpLandingSlideRequiresHeldCrouchAndRunUpMomentumButNotSprint() {
         for (int scenario = 0; scenario < 3; scenario++) {
             events.clear(); World world = new World();
             var state = MovementControllerTest.grounded();
@@ -172,20 +191,92 @@ class SlideTest {
                 var command = input(sequence++, crouch, n == 0, false, 0, 1, 0).withSprint(scenario != 0);
                 state = tick(state, command, world);
             }
-            assertTrue(state.grounded()); assertNotEquals(MovementState.Mode.SLIDE, state.mode());
-            assertFalse(events.contains(MovementEvent.SLIDE_START), "Unexpected landing slide for scenario=" + scenario);
+            assertTrue(state.grounded());
+            if (scenario == 0) {
+                assertEquals(MovementState.Mode.SLIDE, state.mode());
+                assertEquals(MovementBody.LOW, state.body());
+                assertEquals(1, events.stream().filter(event -> event == MovementEvent.SLIDE_START).count());
+            } else {
+                assertNotEquals(MovementState.Mode.SLIDE, state.mode());
+                assertFalse(events.contains(MovementEvent.SLIDE_START), "Unexpected landing slide for scenario=" + scenario);
+            }
         }
     }
 
     @Test
-    void jumpCannotLaunchOrBufferThroughSlideExitAndSlideWinsSimultaneousPresses() {
-        World world = new World();
-        MovementState state = moving();
-        for (int tick = 1; tick <= 12; tick++) {
-            state = tick(state, input(tick, false, tick == 1, tick == 1 || tick == 8 || tick == 10, 0, 0, 0), world);
-            assertEquals(0, state.position().y(), 1.0E-12);
+    void jumpInterruptsYoungAndMatureSlidesWithOrWithoutHeldCrouchAndPreservesMomentum() {
+        for (double time : new double[]{0.05, 0.5}) for (boolean crouch : new boolean[]{false, true}) {
+            events.clear(); World world = new World();
+            var start = new MovementState(MovementVector.ZERO, new MovementVector(0, 0, 6), MovementState.Mode.SLIDE,
+                    time, true, 0, LocomotionState.EMPTY, BlockMotionState.EMPTY, MovementBody.LOW, 0);
+            // No directional input: only the ordinary jump boost should change horizontal velocity.
+            var command = input(1, crouch, false, true, 0, 0, 0);
+            var state = tick(start, command, world);
+            var replay = controller.tick(start, command, MovementTuning.DEFAULT, new World(), event -> {});
+            assertEquals(state, replay);
+            assertEquals(MovementState.Mode.AIR, state.mode()); assertFalse(state.grounded());
+            assertEquals(crouch ? MovementBody.CROUCHING : MovementBody.STANDING, state.body());
+            assertEquals(MovementTuning.DEFAULT.jumpSpeed() - MovementTuning.DEFAULT.gravity() / 20, state.velocity().y(), 1.0E-9);
+            assertEquals(6 + MovementTuning.DEFAULT.walkSpeed() / 4, state.velocity().z(), 1.0E-9);
+            assertEquals(6, state.landing().takeoffSpeed(), 1.0E-9);
+            assertEquals(LandingState.Source.JUMP, state.landing().source());
+            assertEquals(List.of(MovementEvent.SLIDE_END, MovementEvent.JUMP), events);
             assertEquals(0, state.locomotion().jumpBuffer());
+            assertFalse(world.world.overlaps(CollisionBox.body(state.position(), 0.6, state.body().height())));
         }
+    }
+
+    @Test
+    void simultaneousSlideAndJumpPressesLaunchExactlyOnce() {
+        World world = new World();
+        var state = tick(moving(), input(1, true, true, true, 0, 0, 0), world);
+        assertEquals(MovementState.Mode.AIR, state.mode());
+        assertEquals(List.of(MovementEvent.SLIDE_START, MovementEvent.SLIDE_END, MovementEvent.JUMP), events);
+        for (int n = 2; n <= 35; n++) {
+            var held = new MovementInput(n, 0, 0, 0, true, false, false, false, true, 0, 0);
+            state = tick(state, held, world);
+        }
+        assertTrue(state.grounded());
+        assertEquals(1, events.stream().filter(event -> event == MovementEvent.JUMP).count());
+    }
+
+    @Test
+    void blockedSlideJumpDoesNotBufferOrLaunchFromHeldJumpWhenHeadroomReturns() {
+        World world = new World();
+        var ceiling = new CollisionBox(new MovementVector(-100, 1, -100), new MovementVector(100, 2, 100));
+        world.world = new BoxWorld(List.of(FLOOR, ceiling));
+        var start = new MovementState(MovementVector.ZERO, new MovementVector(0, 0, 6), MovementState.Mode.SLIDE,
+                0.05, true, 0, LocomotionState.EMPTY, BlockMotionState.EMPTY, MovementBody.LOW, 0);
+        var state = tick(start, input(1, true, false, true, 0, 0, 0), world);
+        assertEquals(MovementState.Mode.SLIDE, state.mode());
+        assertEquals(MovementBody.LOW, state.body());
+        assertEquals(0, state.locomotion().jumpBuffer());
+        assertFalse(events.contains(MovementEvent.JUMP));
+        world.world = new BoxWorld(List.of(FLOOR));
+        var held = new MovementInput(2, 0, 0, 0, true, false, true, false, true, 0, 0);
+        state = tick(state, held, world);
+        assertEquals(MovementState.Mode.SLIDE, state.mode());
+        assertFalse(events.contains(MovementEvent.JUMP));
+        state = tick(state, input(3, true, false, true, 0, 0, 0), world);
+        assertEquals(MovementState.Mode.AIR, state.mode());
+        assertEquals(1, events.stream().filter(event -> event == MovementEvent.JUMP).count());
+    }
+
+    @Test
+    void slideJumpRequiresGroundSupportAndEnabledJumpSpeed() {
+        World world = new World();
+        var start = new MovementState(MovementVector.ZERO, new MovementVector(0, 0, 6), MovementState.Mode.SLIDE,
+                0.05, true, 0, LocomotionState.EMPTY, BlockMotionState.EMPTY, MovementBody.LOW, 0);
+        var tuning = new MovementTuning(4.317, 0, 20, 61.44, 0.025 * 61.44, 5);
+        var command = input(1, true, false, true, 0, 0, 0);
+        var state = controller.tick(start, command, tuning, world, events::add);
+        assertEquals(MovementState.Mode.SLIDE, state.mode());
+        assertFalse(events.contains(MovementEvent.JUMP));
+        var unsupported = new MovementState(new MovementVector(0, 1, 0), start.velocity(), MovementState.Mode.SLIDE,
+                0.05, false, 0, start.locomotion(), start.blocks(), start.body(), 0);
+        state = tick(unsupported, command, world);
+        assertEquals(MovementState.Mode.AIR, state.mode());
+        assertTrue(state.velocity().y() < 0);
         assertFalse(events.contains(MovementEvent.JUMP));
     }
 

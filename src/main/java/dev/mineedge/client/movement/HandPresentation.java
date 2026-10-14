@@ -28,6 +28,10 @@ public final class HandPresentation {
     }
 
     public Shot update(long now, float pitch, float yaw, double speed, boolean grounded, boolean paused) {
+        return update(now, pitch, yaw, speed, grounded, paused, MovementRate.INTERVAL_NANOS);
+    }
+
+    public Shot update(long now, float pitch, float yaw, double speed, boolean grounded, boolean paused, long intervalNanos) {
         if (shot == null) return null;
         double seconds = Math.max(0, (now - lastFrame) / 1.0E9);
         lastFrame = now;
@@ -38,7 +42,7 @@ public final class HandPresentation {
         this.yaw = yaw - wrapped(yaw - this.yaw) * (1 - lookAlpha);
         double targetBob = grounded ? Math.min(0.1, speed / MovementRate.GAME_TICK_HZ) : 0;
         bob += (targetBob - bob) * (1 - Math.exp(-BOB_RESPONSE * seconds));
-        var position = walking.position(now);
+        var position = walking.position(now, intervalNanos);
         shot = new Shot(position == null ? shot.walkDistance() : (float) position.x(), (float) bob,
                 (float) (pitch - this.pitch), (float) wrapped(yaw - this.yaw));
         return shot;

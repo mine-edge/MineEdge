@@ -73,6 +73,11 @@ public final class CommandHistory {
         return prediction != null && authoritative.equals(prediction.state);
     }
 
+    /** Tuning changes invalidate cached states, not pending commands or their impulses. */
+    public void invalidatePredictions() {
+        for (int i = 0; i < size; i++) prediction(i).state = null;
+    }
+
     /** Replay only unacknowledged impulses and commands, refreshing the matching fast path. */
     public MovementState replay(MovementState baseline, MovementController controller, MovementTuning tuning,
                                 MovementController.MotionResolver resolver) {

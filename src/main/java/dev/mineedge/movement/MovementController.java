@@ -96,7 +96,7 @@ public final class MovementController {
         SurfaceState surfaces = state.surfaces();
         MovementInput originalInput = input;
         if (advanced.turn() != null && !advanced.turn().active()) {
-            advanced = advanced.turn(null, advanced.turnedInAir(), advanced.wallTurned());
+            advanced = advanced.turn(null, advanced.wallTurned());
         }
         double jumpBuffer = mode == MovementState.Mode.SLIDE || LandingController.locked(mode) || traversal.path() != null ? 0
                 : input.jumpPressed() ? MovementTuning.JUMP_BUFFER_SECONDS : locomotion.jumpBuffer();
@@ -108,9 +108,7 @@ public final class MovementController {
                     && advanced.turn() == null && advanced.ledge() == null && advanced.spring() == null) {
                 var turnState = AdvancedMoves.turn(mode, velocity, input, wall);
                 if (turnState != null) {
-                    boolean airTurn = mode == MovementState.Mode.AIR;
-                    advanced = advanced.turn(turnState, advanced.turnedInAir() || airTurn, mode == MovementState.Mode.WALLRUN);
-                    if (airTurn) landing = landing.backward();
+                    advanced = advanced.turn(turnState, mode == MovementState.Mode.WALLRUN);
                     if (mode == MovementState.Mode.WALLCLIMB) {
                         mode = MovementState.Mode.WALLCLIMB_TURNED;
                         time = 0;
@@ -135,11 +133,20 @@ public final class MovementController {
                 grounded = false;
             }
             landing = landing.observe(position, grounded, false);
-            if (advanced.turnedInAir()) landing = landing.backward();
             resolver.landing(landing, tuning);
+            boolean slopeJump = mode == MovementState.Mode.STEEP_SLIDE && step == 0 && input.jumpPressed()
+                    && velocity.y() <= 0 && tuning.jumpSpeed() > 0 && resolver.surface(position, MovementBody.LOW) != null
+                    && resolver.canOccupy(position, MovementBody.STANDING);
+            if (slopeJump) {
+                // Steep slides may follow support without a native grounded flag.
+                grounded = true;
+                mode = MovementState.Mode.GROUND;
+                surfaces = surfaces.slopeExit();
+                events.accept(MovementEvent.STEEP_SLIDE_END);
+            }
             boolean surfaceEligible = traversal.path() == null && advanced.ledge() == null && advanced.spring() == null && !advanced.coiled()
                     && (mode == MovementState.Mode.GROUND || mode == MovementState.Mode.AIR || mode == MovementState.Mode.WALLRUN);
-            var surfaceStep = SurfaceController.step(resolver, position, velocity, grounded, mode, body, time, surfaces,
+            var surfaceStep = slopeJump ? null : SurfaceController.step(resolver, position, velocity, grounded, mode, body, time, surfaces,
                     blocks, input, tuning, step == 0, surfaceEligible, events);
             if (surfaceStep != null) {
                 Motion motion = surfaceStep.motion();
@@ -177,44 +184,6 @@ public final class MovementController {
                 locomotion = new LocomotionState(Math.max(0, velocity.horizontalSpeed() - tuning.walkSpeed()), 0, 0, 0,
                         mode == MovementState.Mode.STEEP_SLIDE ? surfaces.slopeYaw() : input.yaw(), true);
                 continue;
-            }
-            if (mode == MovementState.Mode.BACK_LANDING) {
-                time += MovementTuning.SUBSTEP_SECONDS;
-                if (!grounded) {
-                    mode = MovementState.Mode.AIR;
-                    time = 0;
-                    advanced = advanced.recovery(-1, false);
-                } else {
-                    if (advanced.getUpTime() < 0 && input.forward() < -0.8 && Math.abs(input.strafe()) <= 0.3) {
-                        advanced = advanced.recovery(0, true);
-                        events.accept(MovementEvent.BACK_ROLL);
-                    } else if (advanced.getUpTime() < 0 && (step == 0 && input.jumpPressed()
-                            || input.forward() > 0.8 && time >= LandingController.BACK_GET_UP_DELAY)) {
-                        advanced = advanced.recovery(0, false);
-                    }
-                    double recovery = advanced.getUpTime() < 0 ? -1 : advanced.getUpTime() + MovementTuning.SUBSTEP_SECONDS;
-                    advanced = advanced.recovery(recovery, advanced.backRoll());
-                    boolean done = recovery >= (advanced.backRoll() ? 1 : LandingController.BACK_GET_UP_TIME);
-                    MovementVector horizontal = done && advanced.backRoll() ? input.forwardDirection().scale(-3.59 / MovementTuning.SUBSTEP_SECONDS) : MovementVector.ZERO;
-                    body = MovementBody.LOW;
-                    resolver.body(body);
-                    Motion motion = resolver.resolve(position, horizontal.add(new MovementVector(0, Math.min(0, velocity.y()) - tuning.gravity() * MovementTuning.SUBSTEP_SECONDS, 0)), MovementTuning.SUBSTEP_SECONDS);
-                    position = motion.position();
-                    blocks = motion.blocks();
-                    grounded = motion.grounded();
-                    velocity = new MovementVector(0, motion.velocity().y(), 0);
-                    jumpBuffer = 0;
-                    if (done || !grounded) {
-                        mode = grounded ? MovementState.Mode.GROUND : MovementState.Mode.AIR;
-                        body = exitBody(resolver, position, input.crouchHeld());
-                        time = 0;
-                        advanced = advanced.landed();
-                        events.accept(MovementEvent.LANDING_RECOVERED);
-                    }
-                    resolver.synchronize(velocity, grounded, body);
-                    locomotion = LocomotionState.EMPTY;
-                    continue;
-                }
             }
             // A fresh jump can retry the pull-up or kick away before the return finishes.
             boolean returnInterrupted = false;
@@ -281,7 +250,7 @@ public final class MovementController {
                 if (move.kind() == AdvancedState.LedgeKind.CORNER) {
                     float yaw = move.yawFrom() + move.yawDelta() * (float) (progress * progress * (3 - 2 * progress));
                     resolver.facing(yaw);
-                    advanced = advanced.turn(new AdvancedState.Turn(move.yawFrom(), move.yawDelta(), elapsed, move.duration()), false, false);
+                    advanced = advanced.turn(new AdvancedState.Turn(move.yawFrom(), move.yawDelta(), elapsed, move.duration()), false);
                 }
                 boolean done = elapsed + 1.0E-9 >= move.duration();
                 if (returning && done) {
@@ -399,7 +368,7 @@ public final class MovementController {
                 body = exitBody(resolver, position, input.crouchHeld());
             }
             if (traversal.path() == null && mode != MovementState.Mode.SLIDE && !WallController.active(mode) && !advanced.coiled()) {
-                if (step == 0 && input.crouchPressed() && grounded && body == MovementBody.STANDING
+                if (!slopeJump && step == 0 && input.crouchPressed() && grounded && body == MovementBody.STANDING
                         && Slide.canStart(velocity, input, tuning) && resolver.canOccupy(position, MovementBody.LOW)) {
                     mode = MovementState.Mode.SLIDE;
                     time = 0;
@@ -411,17 +380,24 @@ public final class MovementController {
                     body = exitBody(resolver, position, input.crouchHeld());
                 }
             }
-            if (traversal.path() == null && mode != MovementState.Mode.SLIDE && jumpBuffer > 0 && grounded && tuning.jumpSpeed() > 0
+            boolean slideJump = slopeJump || mode == MovementState.Mode.SLIDE && step == 0 && input.jumpPressed();
+            if (traversal.path() == null && (slideJump || mode != MovementState.Mode.SLIDE && jumpBuffer > 0) && grounded && tuning.jumpSpeed() > 0
                     && resolver.canOccupy(position, MovementBody.STANDING)) {
                 body = MovementBody.STANDING;
                 MovementVector facing = input.forwardDirection();
-                var spring = tuning.features().vaulting() && traversal.cooldown() == 0
+                var spring = !slideJump && tuning.features().vaulting() && traversal.cooldown() == 0
                         ? AdvancedMoves.springboard(resolver, position, velocity, input) : null;
                 if (spring != null) {
                     advanced = advanced.spring(spring);
                     traversal = new TraversalState(null, 0, velocity);
                     jumpBuffer = 0;
                     continue;
+                }
+                if (slideJump) {
+                    // A jump interrupts the minimum slide duration without exit braking.
+                    mode = MovementState.Mode.AIR;
+                    time = 0;
+                    if (!slopeJump) events.accept(MovementEvent.SLIDE_END);
                 }
                 landing = landing.takeoff(position, LandingState.Source.JUMP, velocity.horizontalSpeed());
                 if (velocity.dot(facing) > 0.1 * tuning.walkSpeed() / 4) {
@@ -501,11 +477,11 @@ public final class MovementController {
                 if (next != null) {
                     Motion motion = next.motion();
                     if (WallController.active(mode) && !WallController.active(next.mode())) {
-                        advanced = advanced.turn(advanced.turn(), advanced.turnedInAir(), false);
+                        advanced = advanced.turn(advanced.turn(), false);
                     }
                     if (WallController.active(mode) && next.mode() == MovementState.Mode.AIR && next.wall().wallJump()) {
                         landing = landing.takeoff(position, LandingState.Source.WALL_JUMP, velocity.horizontalSpeed());
-                        advanced = advanced.turn(advanced.turn(), advanced.turnedInAir(), false);
+                        advanced = advanced.turn(advanced.turn(), false);
                     }
                     if (mode == MovementState.Mode.WALLRUN && next.mode() == MovementState.Mode.AIR
                             && next.wall().wallJump() && next.wall().cooldown() <= 0.1) {
@@ -515,7 +491,6 @@ public final class MovementController {
                     } else if (next.traversal().path() != null) {
                         landing = landing.takeoff(position, LandingState.Source.TRAVERSAL, 0);
                     }
-                    if (advanced.turnedInAir()) landing = landing.backward();
                     LandingController.Result contact = !grounded && motion.grounded()
                             ? LandingController.land(landing, motion, Math.max(0, -velocity.y()), next.body(), input, tuning, resolver, events) : null;
                     fallDistance = updateFallDistance(fallDistance, position, motion);
@@ -616,7 +591,7 @@ public final class MovementController {
             double traction = grounded ? resolver.groundTraction(position, body) : 1;
             Locomotion.Result result;
             if (sliding) {
-                jumpBuffer = 0; // Never queue a jump during a slide, including its exit substep.
+                jumpBuffer = 0; // Blocked slide jumps must not queue a launch after clearance or exit.
                 time += MovementTuning.SUBSTEP_SECONDS;
                 Slide.Step slide = Slide.step(velocity, slideYaw, input, tuning, time, MovementTuning.SUBSTEP_SECONDS, traction);
                 slideYaw = slide.yaw();

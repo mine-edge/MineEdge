@@ -1,3 +1,5 @@
+AGENTS.md
+
 # Devenv
 .devenv*
 devenv.local.nix
@@ -14,8 +16,10 @@ devenv.local.yaml
 build/
 out/
 *.class
+bin/
 
 # Minecraft development runs and data-generation cache
+logs/
 run/
 run-data/
 run-gametest/

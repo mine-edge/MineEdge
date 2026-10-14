@@ -4,6 +4,7 @@ import dev.mineedge.MineEdge;
 import dev.mineedge.movement.HandTargets;
 import dev.mineedge.movement.MovementVector;
 import dev.mineedge.movement.WallRunPose;
+import dev.mineedge.movement.RollPose;
 import java.util.UUID;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -12,7 +13,7 @@ import net.minecraft.resources.ResourceLocation;
 
 /** Compact observer poses; prediction state stays private to its owner. */
 public record HandTargetsPayload(int entityId, UUID playerId, HandTargets targets, boolean ledgeHanging,
-                                 boolean sliding, float slideYaw, WallRunPose wallrun) implements CustomPacketPayload {
+                                 boolean sliding, float slideYaw, WallRunPose wallrun, RollPose roll) implements CustomPacketPayload {
     public HandTargetsPayload(int entityId, UUID playerId, HandTargets targets) {
         this(entityId, playerId, targets, false);
     }
@@ -22,14 +23,18 @@ public record HandTargetsPayload(int entityId, UUID playerId, HandTargets target
     public HandTargetsPayload(int entityId, UUID playerId, HandTargets targets, boolean ledgeHanging, boolean sliding, float slideYaw) {
         this(entityId, playerId, targets, ledgeHanging, sliding, slideYaw, WallRunPose.EMPTY);
     }
-    public boolean active() { return targets.active() || sliding || wallrun.active(); }
+    public HandTargetsPayload(int entityId, UUID playerId, HandTargets targets, boolean ledgeHanging, boolean sliding,
+                              float slideYaw, WallRunPose wallrun) {
+        this(entityId, playerId, targets, ledgeHanging, sliding, slideYaw, wallrun, RollPose.EMPTY);
+    }
+    public boolean active() { return targets.active() || sliding || wallrun.active() || roll.active(); }
     public static final Type<HandTargetsPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(MineEdge.MOD_ID, "hand_targets"));
     public static final StreamCodec<RegistryFriendlyByteBuf, HandTargetsPayload> CODEC = StreamCodec.of(
             (buffer, payload) -> {
                 buffer.writeVarInt(payload.entityId);
                 buffer.writeUUID(payload.playerId);
                 buffer.writeByte((payload.targets.active() ? 1 : 0) | (payload.ledgeHanging ? 2 : 0)
-                        | (payload.sliding ? 4 : 0) | (payload.wallrun.active() ? 8 : 0));
+                        | (payload.sliding ? 4 : 0) | (payload.wallrun.active() ? 8 : 0) | (payload.roll.active() ? 16 : 0));
                 if (payload.targets.active()) {
                     vector(buffer, payload.targets.left());
                     vector(buffer, payload.targets.right());
@@ -42,6 +47,10 @@ public record HandTargetsPayload(int entityId, UUID playerId, HandTargets target
                     buffer.writeFloat(payload.wallrun.side());
                     buffer.writeFloat(payload.wallrun.speed());
                 }
+                if (payload.roll.active()) {
+                    buffer.writeFloat(payload.roll.yaw());
+                    buffer.writeFloat(payload.roll.elapsed());
+                }
             }, buffer -> {
                 int id = buffer.readVarInt();
                 UUID uuid = buffer.readUUID();
@@ -51,7 +60,8 @@ public record HandTargetsPayload(int entityId, UUID playerId, HandTargets target
                 boolean sliding = (flags & 4) != 0;
                 float slideYaw = sliding ? buffer.readFloat() : 0;
                 var wallrun = (flags & 8) != 0 ? new WallRunPose(buffer.readFloat(), buffer.readFloat(), buffer.readFloat()) : WallRunPose.EMPTY;
-                return new HandTargetsPayload(id, uuid, targets, (flags & 2) != 0, sliding, slideYaw, wallrun);
+                var roll = (flags & 16) != 0 ? new RollPose(buffer.readFloat(), buffer.readFloat()) : RollPose.EMPTY;
+                return new HandTargetsPayload(id, uuid, targets, (flags & 2) != 0, sliding, slideYaw, wallrun, roll);
             });
 
     private static void vector(RegistryFriendlyByteBuf buffer, MovementVector v) {

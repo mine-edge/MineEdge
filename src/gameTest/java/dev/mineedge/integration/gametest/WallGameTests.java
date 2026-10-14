@@ -474,14 +474,16 @@ public final class WallGameTests {
     }
 
     @GameTest(template = "empty", timeoutTicks = 40)
-    public static void gameplayTurnBackwardLandingAndGetUpReplay(GameTestHelper helper) {
+    public static void gameplayAirTurnAndOrdinaryLandingReplay(GameTestHelper helper) {
         floor(helper);
         var initial = new MovementState(position(helper, 4.5, 1, 3.5), new MovementVector(0, 0, 4), MovementState.Mode.GROUND, 0, true, 0);
         var result = compare(helper, initial, 80, (tick, state) -> new MovementInput(tick + 1, tick == 0 ? 1 : 0, 0, 0,
                 tick == 0 || tick == 45, tick == 0 || tick == 45, false, false, true,
                 tick < 2 ? 0 : 180, 0, tick == 1));
-        helper.assertTrue(result.events().containsAll(List.of(MovementEvent.TURN, MovementEvent.LAND_ON_BACK, MovementEvent.LANDING_RECOVERED)), "Turn/landing/get-up chain failed");
-        helper.assertTrue(result.state().mode() == MovementState.Mode.GROUND, "Get-up remained locked");
+        helper.assertTrue(result.events().containsAll(List.of(MovementEvent.TURN, MovementEvent.LAND)), "Turn/landing chain failed");
+        helper.assertTrue(result.events().stream().filter(event -> event == MovementEvent.JUMP).count() == 2, "Post-turn landing blocked another jump");
+        helper.assertTrue(!result.events().contains(MovementEvent.LANDING_RECOVERED), "Air turn added a landing recovery");
+        helper.assertTrue(result.state().mode() == MovementState.Mode.GROUND && result.state().body() == MovementBody.STANDING, "Turn did not finish standing on the ground");
         helper.succeed();
     }
 

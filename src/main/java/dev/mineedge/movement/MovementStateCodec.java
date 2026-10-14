@@ -25,11 +25,14 @@ public final class MovementStateCodec {
     private static final VaultType[] VAULT_TYPES = VaultType.values();
     private static final AdvancedState.LedgeKind[] LEDGE_KINDS = AdvancedState.LedgeKind.values();
     private static final SurfacePath.Kind[] SURFACE_KINDS = SurfacePath.Kind.values();
+    // Version 2 reserves mode 13 and landing source 4 for the removed back landing.
+    private static final int REMOVED_BACK_MODE = 13, REMOVED_BACK_SOURCE = 4;
 
     private static void writeState(FriendlyByteBuf buffer, MovementState state) {
         writeVector(buffer, state.position());
         writeVector(buffer, state.velocity());
-        buffer.writeEnum(state.mode());
+        int mode = state.mode().ordinal();
+        buffer.writeVarInt(mode >= REMOVED_BACK_MODE ? mode + 1 : mode);
         writeNumber(buffer, state.modeTime());
         buffer.writeBoolean(state.grounded());
         writeFloat(buffer, state.fallDistance());
@@ -47,7 +50,9 @@ public final class MovementStateCodec {
     private static MovementState readState(FriendlyByteBuf buffer) {
         MovementVector position = readVector(buffer);
         MovementVector velocity = readVector(buffer);
-        MovementState.Mode mode = MODES[buffer.readVarInt()];
+        int modeId = buffer.readVarInt();
+        MovementState.Mode mode = modeId == REMOVED_BACK_MODE ? MovementState.Mode.GROUND
+                : MODES[modeId > REMOVED_BACK_MODE ? modeId - 1 : modeId];
         double modeTime = readNumber(buffer);
         boolean grounded = buffer.readBoolean();
         float fallDistance = readFloat(buffer);
@@ -184,7 +189,7 @@ public final class MovementStateCodec {
         buffer.writeBoolean(empty);
         if (empty) return;
         buffer.writeBoolean(state.coiled());
-        buffer.writeBoolean(state.turnedInAir());
+        buffer.writeBoolean(false); // Reserved version-2 air-turn landing flag.
         buffer.writeBoolean(state.wallTurned());
         buffer.writeBoolean(state.turn() != null);
         if (state.turn() != null) {
@@ -217,25 +222,30 @@ public final class MovementStateCodec {
             writeNumber(buffer, state.spring().speed());
             writeNumber(buffer, state.spring().elapsed());
         }
-        writeNumber(buffer, state.getUpTime());
-        buffer.writeBoolean(state.backRoll());
+        writeNumber(buffer, -1); // Reserved version-2 back-landing recovery fields.
+        buffer.writeBoolean(false);
     }
 
     private static AdvancedState readAdvanced(FriendlyByteBuf buffer) {
         if (buffer.readBoolean()) return AdvancedState.EMPTY;
         boolean coiled = buffer.readBoolean();
-        boolean turnedInAir = buffer.readBoolean();
+        buffer.readBoolean(); // Discard legacy air-turn landing flag.
         boolean wallTurned = buffer.readBoolean();
         var turn = buffer.readBoolean() ? new AdvancedState.Turn(readFloat(buffer), readFloat(buffer), readNumber(buffer), readNumber(buffer)) : null;
         var ledge = buffer.readBoolean() ? new AdvancedState.LedgeMove(LEDGE_KINDS[buffer.readVarInt()], readVector(buffer),
                 readVector(buffer), readVector(buffer), readVector(buffer), readBox(buffer), readBox(buffer), readNumber(buffer), readNumber(buffer), readFloat(buffer), readFloat(buffer)) : null;
         var spring = buffer.readBoolean() ? new AdvancedState.Springboard(readTraversal(buffer).path(), readNumber(buffer), readNumber(buffer)) : null;
-        return new AdvancedState(coiled, turnedInAir, wallTurned, turn, ledge, spring, readNumber(buffer), buffer.readBoolean());
+        readNumber(buffer); // Discard legacy recovery timer and backward-roll flag.
+        buffer.readBoolean();
+        return new AdvancedState(coiled, wallTurned, turn, ledge, spring);
     }
 
     private static LandingState readLanding(FriendlyByteBuf buffer) {
-        return new LandingState(readNumber(buffer), readNumber(buffer), readNumber(buffer),
-                LANDING_SOURCES[buffer.readVarInt()], readNumber(buffer), readNumber(buffer), readNumber(buffer), buffer.readBoolean());
+        double apex = readNumber(buffer), distance = readNumber(buffer), impact = readNumber(buffer);
+        int sourceId = buffer.readVarInt();
+        var source = sourceId == REMOVED_BACK_SOURCE ? LandingState.Source.OTHER : LANDING_SOURCES[sourceId];
+        return new LandingState(apex, distance, impact, source,
+                readNumber(buffer), readNumber(buffer), readNumber(buffer), buffer.readBoolean());
     }
 
     private static WallState readWall(FriendlyByteBuf buffer, MovementVector position, MovementVector velocity) {

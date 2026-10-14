@@ -14,6 +14,7 @@ import dev.mineedge.movement.MovementTuning;
 import dev.mineedge.movement.MovementFeatures;
 import dev.mineedge.movement.MovementVector;
 import dev.mineedge.movement.WallRunPose;
+import dev.mineedge.movement.RollPose;
 import dev.mineedge.movement.wall.WallState;
 import dev.mineedge.movement.landing.LandingState;
 import dev.mineedge.movement.AdvancedState;
@@ -31,28 +32,47 @@ import java.util.Random;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MovementPayloadTest {
-    @Test void trackingPosesRoundTripWithCompactGripsSlidesWallrunsAndRelease() {
+    @Test void trackingPosesRoundTripWithCompactGripsSlidesWallrunsRollsAndRelease() {
         var uuid = java.util.UUID.randomUUID();
         for (var hands : new dev.mineedge.movement.HandTargets[]{dev.mineedge.movement.HandTargets.EMPTY,
                 new dev.mineedge.movement.HandTargets(new MovementVector(-0.25, 1.75, 0.5),
                         new MovementVector(0.25, 1.5, 0.5), 1, 0.75F)}) for (boolean hanging : new boolean[]{false, true})
                 for (boolean sliding : new boolean[]{false, true})
-                for (var wallrun : new WallRunPose[]{WallRunPose.EMPTY, new WallRunPose(179.5F, -1, 5.6F), new WallRunPose(-90, 1, 3)}) {
-            var payload = new HandTargetsPayload(12, uuid, hands, hanging, sliding, sliding ? -179.5F : 0, wallrun);
+                for (var wallrun : new WallRunPose[]{WallRunPose.EMPTY, new WallRunPose(179.5F, -1, 5.6F), new WallRunPose(-90, 1, 3)})
+                for (var roll : new RollPose[]{RollPose.EMPTY, new RollPose(-179.5F, 0), new RollPose(90, 0.375F)}) {
+            var payload = new HandTargetsPayload(12, uuid, hands, hanging, sliding, sliding ? -179.5F : 0, wallrun, roll);
             var buf = buffer();
             try {
                 HandTargetsPayload.CODEC.encode(buf, payload);
-                assertTrue(buf.readableBytes() <= 66);
-                if (!hands.active()) assertEquals(18 + (sliding ? 4 : 0) + (wallrun.active() ? 12 : 0), buf.readableBytes());
+                assertTrue(buf.readableBytes() <= 74);
+                if (!hands.active()) assertEquals(18 + (sliding ? 4 : 0) + (wallrun.active() ? 12 : 0) + (roll.active() ? 8 : 0), buf.readableBytes());
                 assertEquals(payload, HandTargetsPayload.CODEC.decode(buf));
                 assertEquals(0, buf.readableBytes());
-                assertEquals(hands.active() || sliding || wallrun.active(), payload.active());
+                assertEquals(hands.active() || sliding || wallrun.active() || roll.active(), payload.active());
             } finally { buf.release(); }
         }
     }
 
     private static RegistryFriendlyByteBuf buffer() {
         return new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY, ConnectionType.NEOFORGE);
+    }
+
+    @Test void tuningRevisionsRoundTripWithoutExpandingRoutineSnapshotsWithFullTuning() {
+        var state = new MovementState(MovementVector.ZERO, MovementVector.ZERO, MovementState.Mode.GROUND, 0, true, 0);
+        var tuning = new MovementTuning(1.5, 9, 12, 61.44, 1.536, 5, 0.4);
+        for (long revision : new long[] {0, 1, 128, 1L << 40}) {
+            var session = new SessionPayload(ResourceLocation.parse("minecraft:overworld"), 7, 100, true, true, tuning, revision);
+            var snapshot = new SnapshotPayload(7, 50, 100, state, Pose.STANDING, revision);
+            var buffer = buffer();
+            try {
+                SessionPayload.CODEC.encode(buffer, session);
+                assertEquals(session, SessionPayload.CODEC.decode(buffer));
+                SnapshotPayload.CODEC.encode(buffer, snapshot);
+                assertTrue(buffer.readableBytes() < 100, "Snapshots should only carry the compact tuning revision");
+                assertEquals(snapshot, SnapshotPayload.CODEC.decode(buffer));
+                assertEquals(0, buffer.readableBytes());
+            } finally { buffer.release(); }
+        }
     }
 
     @Test void surfaceSnapshotsPreserveClimbStepsPathsAndSteepSlideRecovery() {
@@ -78,16 +98,16 @@ class MovementPayloadTest {
         }
     }
 
-    @Test void advancedSnapshotsPreserveTurnsLedgePathsSpringboardsAndRecovery() {
+    @Test void advancedSnapshotsPreserveTurnsLedgePathsAndSpringboards() {
         var p = new MovementVector(2, 3, 4);
         var shape = new CollisionBox(new MovementVector(1, 0, 5), new MovementVector(4, 5, 8));
         for (var kind : AdvancedState.LedgeKind.values()) {
             var path = new TraversalPath(VaultType.SPRINGBOARD, p, p.add(new MovementVector(0, 2, 0)),
                     p.add(new MovementVector(0, 2, 2)), p.add(new MovementVector(0, 1, 2)), new MovementVector(0, 9.5, 5), shape, shape);
-            var advanced = new AdvancedState(true, true, true, new AdvancedState.Turn(179, 180, 0.125, 0.2),
+            var advanced = new AdvancedState(true, true, new AdvancedState.Turn(179, 180, 0.125, 0.2),
                     new AdvancedState.LedgeMove(kind, p, p.add(new MovementVector(1, 0, 0)), p.add(new MovementVector(1, 1, 0)),
                             new MovementVector(0, 0, -1), shape, shape, 0.25, 1.07, 179, 90),
-                    new AdvancedState.Springboard(path, 6.5, 0.3), 0.41, true);
+                    new AdvancedState.Springboard(path, 6.5, 0.3));
             var s = new MovementState(p, new MovementVector(0, 0, 6), MovementState.Mode.LEDGE_HANG, 1, false, 0,
                     LocomotionState.EMPTY, BlockMotionState.EMPTY, MovementBody.CROUCHING, 0, TraversalState.EMPTY,
                     WallState.EMPTY, LandingState.capture(p, false, 0), advanced);

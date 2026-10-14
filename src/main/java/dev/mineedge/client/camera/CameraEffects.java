@@ -2,6 +2,7 @@ package dev.mineedge.client.camera;
 
 import dev.mineedge.movement.MovementEvent;
 import dev.mineedge.movement.MovementState;
+import dev.mineedge.client.movement.RollPresentation;
 
 /** Render-time body inertia, gait and parkour feedback; angles are Minecraft degrees. */
 public final class CameraEffects {
@@ -17,6 +18,8 @@ public final class CameraEffects {
     private final Spring posturePitch = new Spring();
     private double roll, fov, landingFov, trauma, time, swayRoll, swayPitch, bobWeight, gaitPhase;
     private boolean hasVelocity;
+    private double tumbleTime = -1;
+    private boolean wasRolling;
 
     public void event(MovementEvent event, double impact) {
         switch (event) {
@@ -25,7 +28,7 @@ public final class CameraEffects {
                 kick.impulse(Math.clamp(impact * 0.06, 0, 1.2));
                 trauma = Math.min(1, trauma + Math.clamp((impact - 5) * 0.05, 0, 0.35));
             }
-            case HARD_LAND, LAND_ON_BACK -> { dip.impulse(-2.4); kick.impulse(3); trauma = 0.8; }
+            case HARD_LAND -> { dip.impulse(-2.4); kick.impulse(3); trauma = 0.8; }
             case SOFT_LAND -> { dip.impulse(-0.6); kick.impulse(0.6); trauma = Math.min(1, trauma + 0.15); }
             case LEDGE_GRAB -> { dip.impulse(-1); trauma = Math.min(1, trauma + 0.35); }
             case ROLL_START, WALL_JUMP, SLIDE_START, WALL_KICK, SPRINGBOARD_START, STEEP_SLIDE_START -> trauma = Math.min(1, trauma + 0.18);
@@ -38,7 +41,7 @@ public final class CameraEffects {
                 actionPitch.impulse(24); actionDip.impulse(-0.5);
             }
             case SLIDE_START, STEEP_SLIDE_START, COIL_START -> actionPitch.impulse(18);
-            case ROLL_START, BACK_ROLL -> { actionPitch.impulse(42); actionRoll.impulse(-32); }
+            case ROLL_START -> actionRoll.impulse(-32);
             case TURN, WALLRUN_TURN, SHIMMY_CORNER -> actionRoll.impulse(24);
             case SPRINGBOARD_START -> { actionPitch.impulse(-30); actionDip.impulse(-0.7); }
             case LEDGE_GRAB, LADDER_GRAB, PIPE_GRAB -> actionPitch.impulse(16);
@@ -50,6 +53,7 @@ public final class CameraEffects {
 
     public Shot update(double dt, MovementState state, float yaw, Settings settings) {
         if (!settings.enabled()) { reset(); return Shot.NONE; }
+        double tumbleDt = Math.max(0, dt);
         dt = Math.clamp(dt, 0, 0.1);
         time += dt;
         double speed = state.velocity().horizontalSpeed();
@@ -112,6 +116,7 @@ public final class CameraEffects {
         double posture = settings.parkourStrength() > 0 ? posturePitch.step(dt, 144, 24, posture(state)) : 0;
         pitch += (Math.clamp(actionPitch.step(dt, 100, 16), -6, 6) + posture) * settings.parkourStrength()
                 + swayPitch * settings.swayStrength() + 0.5 * Math.sin(gaitPhase * 2 - 0.35) * bob;
+        pitch += tumble(tumbleDt, state, settings);
         height += Math.clamp(actionDip.step(dt, 100, 16), -0.06, 0.06) * settings.parkourStrength()
                 // A soft second harmonic gives each footfall a compression/recovery shape.
                 + 0.028 * (0.8 * gait + 0.2 * Math.sin(gaitPhase * 4)) * bob;
@@ -129,8 +134,26 @@ public final class CameraEffects {
     public void reset() {
         roll = fov = landingFov = trauma = time = swayRoll = swayPitch = bobWeight = gaitPhase = 0;
         hasVelocity = false;
+        tumbleTime = -1;
+        wasRolling = false;
         dip.reset(); kick.reset(); actionPitch.reset(); actionRoll.reset(); actionDip.reset();
         velocityX.reset(); velocityY.reset(); velocityZ.reset(); posturePitch.reset();
+    }
+    private double tumble(double dt, MovementState state, Settings settings) {
+        boolean rolling = state.mode() == MovementState.Mode.ROLL;
+        boolean enabled = settings.roll() && settings.rollStrength() > 0 && settings.parkourStrength() > 0;
+        if (!enabled) tumbleTime = -1;
+        else if (rolling && !wasRolling) tumbleTime = Math.clamp(state.modeTime(), 0, RollPresentation.DURATION);
+        else if (tumbleTime >= 0) tumbleTime += dt;
+        wasRolling = rolling;
+        if (tumbleTime < 0) return 0;
+        // Finish even if the physical roll leaves a ledge early. Render-time progress avoids
+        // simulation-tick stair steps; camera and body share the same slower turn curve.
+        double progress = tumbleTime + 1.0E-9 >= RollPresentation.DURATION
+                ? 1 : Math.clamp(tumbleTime / RollPresentation.DURATION, 0, 1);
+        if (progress >= 1) tumbleTime = -1;
+        // Always complete a revolution: scaling this angle would snap back on exit at partial strength.
+        return 360 * RollPresentation.turn(progress);
     }
     private static double posture(MovementState state) {
         return switch (state.mode()) {

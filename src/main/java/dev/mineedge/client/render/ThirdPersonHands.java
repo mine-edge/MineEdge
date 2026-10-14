@@ -10,6 +10,7 @@ import dev.mineedge.movement.MovementRate;
 import dev.mineedge.movement.MovementState;
 import dev.mineedge.movement.MovementVector;
 import dev.mineedge.movement.WallRunPose;
+import dev.mineedge.movement.RollPose;
 import dev.mineedge.network.HandTargetsPayload;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -26,7 +27,7 @@ import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
-/** Per-player render-only traversal, slide and wallrun samples. */
+/** Per-player render-only traversal, slide, wallrun and fall-roll samples. */
 public final class ThirdPersonHands {
     private static final Map<Entity, Presentation> PLAYERS = new WeakHashMap<>();
     private static long frame;
@@ -40,6 +41,7 @@ public final class ThirdPersonHands {
         final ThirdPersonLegs.Animation legs = new ThirdPersonLegs.Animation();
         final SlideAnimation slide = new SlideAnimation();
         final WallRunAnimation wallrun = new WallRunAnimation();
+        final RollAnimation roll = new RollAnimation();
         HandTargets targets = HandTargets.EMPTY, shot = HandTargets.EMPTY;
         MovementVector feet;
         float leftWeight, rightWeight;
@@ -56,7 +58,10 @@ public final class ThirdPersonHands {
             }
         }
 
-        boolean fresh() { return !relative || frame - received < 1_000_000_000L; }
+        boolean fresh() {
+            long tickInterval = ClientMovement.INSTANCE.intervalNanos() * MovementRate.STEPS_PER_GAME_TICK;
+            return !relative || frame - received < Math.max(1_000_000_000L, 2 * tickInterval);
+        }
 
         HandTargets sample() {
             if (sampled == frame || paused && sampled != 0) return shot;
@@ -68,9 +73,10 @@ public final class ThirdPersonHands {
             rightWeight += ((fresh ? targets.rightWeight() : 0) - rightWeight) * (float) alpha;
             if (leftWeight < 0.001F && rightWeight < 0.001F) return shot = HandTargets.EMPTY;
             // Remote positions use vanilla's tick interpolation; local grips use the simulation interval.
-            long sampleTime = relative ? frame - 50_000_000L + MovementRate.INTERVAL_NANOS : frame;
-            var l = left.position(sampleTime);
-            var r = right.position(sampleTime);
+            long interval = ClientMovement.INSTANCE.intervalNanos();
+            long sampleTime = relative ? frame - interval * MovementRate.STEPS_PER_GAME_TICK + interval : frame;
+            var l = left.position(sampleTime, interval);
+            var r = right.position(sampleTime, interval);
             return shot = l == null || r == null ? HandTargets.EMPTY : new HandTargets(l, r, leftWeight, rightWeight);
         }
     }
@@ -91,6 +97,7 @@ public final class ThirdPersonHands {
         entry.slide.record(state.mode() == MovementState.Mode.SLIDE || state.mode() == MovementState.Mode.STEEP_SLIDE,
                 state.mode() == MovementState.Mode.STEEP_SLIDE ? state.surfaces().slopeYaw() : state.slideYaw(), now);
         entry.wallrun.record(WallRunPose.sample(state), now);
+        entry.roll.record(RollPose.sample(state), now);
     }
 
     public static void resetLocal(AbstractClientPlayer player, MovementState state, long now) {
@@ -109,6 +116,7 @@ public final class ThirdPersonHands {
         entry.record(payload.targets(), payload.ledgeHanging(), now);
         entry.slide.record(payload.sliding(), payload.slideYaw(), now);
         entry.wallrun.record(payload.wallrun(), now);
+        entry.roll.record(payload.roll(), now);
     }
 
     public static void logout(ClientPlayerNetworkEvent.LoggingOut event) { PLAYERS.clear(); }
@@ -131,6 +139,25 @@ public final class ThirdPersonHands {
         if (entry == null) return null;
         var shot = entry.wallrun.sample(frame, paused);
         return shot.weight() == 0 ? null : shot;
+    }
+
+    public static RollAnimation.Shot rollShot(Entity entity) {
+        var entry = animationEntry(entity);
+        if (entry == null) return null;
+        var shot = entry.roll.sample(frame, paused);
+        if (shot != RollAnimation.Shot.NONE) {
+            // Keep old climbing contacts fading while the roll owns the limbs.
+            entry.sample();
+            entry.legs.reset();
+        }
+        return shot == RollAnimation.Shot.NONE ? null : shot;
+    }
+
+    public static float rollProneWeight(Entity entity) {
+        var entry = animationEntry(entity);
+        if (entry == null) return 0;
+        entry.roll.sample(frame, paused);
+        return entry.roll.suppressesProne() ? 1 : 0;
     }
 
     private static Presentation animationEntry(Entity entity) {

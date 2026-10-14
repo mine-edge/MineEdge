@@ -2,6 +2,7 @@ package dev.mineedge.client.camera;
 
 import dev.mineedge.movement.*;
 import dev.mineedge.movement.wall.WallState;
+import dev.mineedge.client.movement.RollPresentation;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -255,5 +256,77 @@ class CameraEffectsTest {
         fx.update(0.1, slide, 0, parkour);
         assertEquals(0, fx.update(0.1, slide, 0, OFF).pitch());
         assertEquals(0, fx.update(0, slide, 0, parkour).pitch());
+    }
+
+    @Test void fallRollCompletesOneForwardRevolutionAtDifferentRenderRatesAndPartialStrength() {
+        var parkour = new CameraEffects.Settings(true, true, 0.4, 0, 0, 0, 0, 0, 0.7);
+        var noRotation = new CameraEffects.Settings(true, false, 0.4, 0, 0, 0, 0, 0, 0.7);
+        for (int fps : new int[]{30, 60, 144}) {
+            var fx = new CameraEffects();
+            var baseline = new CameraEffects();
+            var rolling = state(MovementState.Mode.ROLL);
+            assertEquals(0, fx.update(0, rolling, 0, parkour).pitch());
+            baseline.update(0, rolling, 0, noRotation);
+            double previous = 0;
+            for (int frame = 1; frame <= Math.ceil(fps * RollPresentation.DURATION); frame++) {
+                double rotation = fx.update(1.0 / fps, rolling, 0, parkour).pitch()
+                        - baseline.update(1.0 / fps, rolling, 0, noRotation).pitch();
+                assertTrue(rotation > previous, "The camera must keep rotating forward");
+                if (frame * 5 == fps * 2) assertEquals(180, rotation, 1.0E-8);
+                previous = rotation;
+            }
+            assertEquals(360, previous, 1.0E-8);
+            // A stale presentation state must not start a second revolution.
+            assertEquals(baseline.update(1.0 / fps, rolling, 0, noRotation).pitch(),
+                    fx.update(1.0 / fps, rolling, 0, parkour).pitch(), 1.0E-8);
+        }
+    }
+
+    @Test void interruptedRollFinishesRotationAndTheNextRollStartsFresh() {
+        var parkour = new CameraEffects.Settings(true, true, 1, 0, 0, 0, 0, 0, 1);
+        var noRotation = new CameraEffects.Settings(true, false, 1, 0, 0, 0, 0, 0, 1);
+        var fx = new CameraEffects();
+        var baseline = new CameraEffects();
+        var rolling = new MovementState(MovementVector.ZERO, MovementVector.ZERO,
+                MovementState.Mode.ROLL, RollPresentation.DURATION / 2, true, 0);
+        assertEquals(180, fx.update(0, rolling, 0, parkour).pitch(), 1.0E-8);
+        baseline.update(0, rolling, 0, noRotation);
+        var air = state(MovementState.Mode.AIR);
+        double rotation = 0;
+        for (int i = 0; i < 24; i++) {
+            rotation = fx.update(1.0 / 60, air, 0, parkour).pitch()
+                    - baseline.update(1.0 / 60, air, 0, noRotation).pitch();
+            assertTrue(rotation > 180);
+        }
+        assertEquals(360, rotation, 1.0E-8);
+        assertEquals(baseline.update(0, air, 0, noRotation).pitch(), fx.update(0, air, 0, parkour).pitch());
+        assertEquals(baseline.update(0, state(MovementState.Mode.ROLL), 0, noRotation).pitch(),
+                fx.update(0, state(MovementState.Mode.ROLL), 0, parkour).pitch());
+    }
+
+    @Test void disablingOrResettingClearsFallRollRotationImmediately() {
+        var parkour = new CameraEffects.Settings(true, true, 1, 0, 0, 0, 0, 0, 1);
+        var rolling = state(MovementState.Mode.ROLL);
+        var standing = state(MovementState.Mode.GROUND);
+        for (var disabled : new CameraEffects.Settings[]{OFF,
+                new CameraEffects.Settings(true, false, 1, 0, 0, 0, 0, 0, 1),
+                new CameraEffects.Settings(true, true, 0, 0, 0, 0, 0, 0, 1),
+                new CameraEffects.Settings(false, true, 1, 0, 0, 0, 0, 0, 1)}) {
+            var fx = new CameraEffects();
+            var baseline = new CameraEffects();
+            var noRotation = new CameraEffects.Settings(true, false, 1, 0, 0, 0, 0, 0, 1);
+            fx.update(0, rolling, 0, parkour);
+            baseline.update(0, rolling, 0, noRotation);
+            assertTrue(fx.update(0.1, rolling, 0, parkour).pitch() > 10);
+            baseline.update(0.1, rolling, 0, noRotation);
+            assertEquals(baseline.update(0, rolling, 0, disabled).pitch(),
+                    fx.update(0, rolling, 0, disabled).pitch());
+            assertEquals(baseline.update(0, standing, 0, parkour).pitch(),
+                    fx.update(0, standing, 0, parkour).pitch());
+            fx.update(0, rolling, 0, parkour);
+            fx.update(0.1, rolling, 0, parkour);
+            fx.reset();
+            assertEquals(CameraEffects.Shot.NONE, fx.update(0, standing, 0, parkour));
+        }
     }
 }

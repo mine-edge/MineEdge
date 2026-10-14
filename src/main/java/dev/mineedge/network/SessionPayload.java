@@ -7,20 +7,29 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
-/** Sent on lifecycle/settings changes, or as a small heartbeat while vanilla owns movement. */
+/** Sent on lifecycle/tuning changes, or as a small heartbeat while vanilla owns movement. */
 public record SessionPayload(ResourceLocation dimension, long epoch, long serverTick,
-                             boolean enabled, boolean active, MovementTuning tuning) implements CustomPacketPayload {
+                             boolean enabled, boolean active, MovementTuning tuning, long tuningRevision) implements CustomPacketPayload {
+    public SessionPayload(ResourceLocation dimension, long epoch, long serverTick,
+                          boolean enabled, boolean active, MovementTuning tuning) {
+        this(dimension, epoch, serverTick, enabled, active, tuning, 0);
+    }
+
     public static final Type<SessionPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(MineEdge.MOD_ID, "session"));
     public static final StreamCodec<RegistryFriendlyByteBuf, SessionPayload> CODEC = StreamCodec.of(
             (buffer, payload) -> {
                 buffer.writeResourceLocation(payload.dimension);
                 buffer.writeVarLong(payload.epoch);
                 buffer.writeVarLong(payload.serverTick);
+                buffer.writeVarLong(payload.tuningRevision);
                 buffer.writeBoolean(payload.enabled);
                 buffer.writeBoolean(payload.active);
                 writeTuning(buffer, payload.tuning);
-            }, buffer -> new SessionPayload(buffer.readResourceLocation(), buffer.readVarLong(), buffer.readVarLong(),
-                    buffer.readBoolean(), buffer.readBoolean(), readTuning(buffer)));
+            }, buffer -> {
+                var dimension = buffer.readResourceLocation();
+                long epoch = buffer.readVarLong(), tick = buffer.readVarLong(), revision = buffer.readVarLong();
+                return new SessionPayload(dimension, epoch, tick, buffer.readBoolean(), buffer.readBoolean(), readTuning(buffer), revision);
+            });
 
     private static void writeTuning(RegistryFriendlyByteBuf buffer, MovementTuning tuning) {
         boolean defaults = tuning.equals(MovementTuning.DEFAULT);

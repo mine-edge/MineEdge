@@ -11,7 +11,7 @@ public record MovementState(MovementVector position, MovementVector velocity, Mo
                              BlockMotionState blocks, MovementBody body, float slideYaw, TraversalState traversal, WallState wall,
                                LandingState landing, AdvancedState advanced, SurfaceState surfaces) {
     public enum Mode { GROUND, AIR, SLIDE, VAULT, MANTLE, WALLRUN, WALLCLIMB, LEDGE_HANG, PULL_UP, ROLL, HARD_LANDING,
-         WALLCLIMB_TURNED, SPRINGBOARD, BACK_LANDING, CLIMB_ATTACH, LADDER_CLIMB, PIPE_CLIMB, CLIMB_EXIT,
+         WALLCLIMB_TURNED, SPRINGBOARD, CLIMB_ATTACH, LADDER_CLIMB, PIPE_CLIMB, CLIMB_EXIT,
          STEP_UP, STEEP_SLIDE, SOFT_LANDING }
 
     public MovementState(MovementVector position, MovementVector velocity, Mode mode, double modeTime, boolean grounded,

@@ -15,6 +15,7 @@ import dev.mineedge.integration.MovementSprint;
 import dev.mineedge.movement.MovementBody;
 import dev.mineedge.movement.MovementController;
 import dev.mineedge.movement.MovementInput;
+import dev.mineedge.movement.MovementRate;
 import dev.mineedge.movement.MovementState;
 import dev.mineedge.movement.MovementTuning;
 import dev.mineedge.movement.MovementVector;
@@ -61,12 +62,14 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
     private final PredictionImpulses impulses = new PredictionImpulses();
     private MovementInput input = MovementInput.idle(0, 0, 0);
     private long epoch;
+    private long tuningRevision;
     private long minimumEpoch;
     private long sequence;
     private long acknowledged;
     private long serverTick = Long.MIN_VALUE;
     private long sessionTick = Long.MIN_VALUE;
     private SimulationLoop simulation;
+    private long intervalNanos = MovementRate.INTERVAL_NANOS;
     private boolean active;
     private boolean enabled;
     private final InputLatch buttons = new InputLatch();
@@ -103,6 +106,9 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
 
     public void clientTick(ClientTickEvent.Pre event) {
         Minecraft minecraft = Minecraft.getInstance();
+        float tickRate = minecraft.level == null ? MovementRate.GAME_TICK_HZ : minecraft.level.tickRateManager().tickrate();
+        intervalNanos = MovementRate.intervalNanos(tickRate);
+        if (simulation != null) simulation.setTickRate(tickRate);
         if (minecraft.screen != null || !minecraft.isWindowActive()) {
             buttons.interrupt();
             networkButtons.interrupt();
@@ -110,9 +116,20 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
         }
     }
 
-    /** Called only for native aiStep sprint decisions, not simulation or metadata writes. */
-    public void sprintChanged(boolean sprinting) {
-        sprint.update(sprinting);
+    /** Native and mod sprint decisions, excluding our simulation/presentation writes. */
+    @Override
+    public void sprintChanged(Player player, boolean sprinting) {
+        if (player == owner && active) sprint.update(sprinting);
+    }
+
+    public void beginNativeSprint(LocalPlayer player) {
+        if (!owns(player)) return;
+        // Vanilla continuation must see its last approved decision, not a flag
+        // cleared by a slide/crouch pose or overwritten by entity metadata.
+        // Keep the entry tick's intent for sliding; held crouch stops it next tick.
+        if (player.input.shiftKeyDown || state.mode() == MovementState.Mode.HARD_LANDING) sprint.update(false);
+        boolean accepted = MovementSprint.setSprinting(player, sprint.requested());
+        if (!accepted) sprint.update(false);
     }
 
     public void capture(MovementInputUpdateEvent event) {
@@ -146,12 +163,12 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
             // All camera/model passes in this frame share exactly the same sample.
             long now = System.nanoTime();
             if (!minecraft.isPaused() || renderPosition == null) {
-                renderPosition = interpolation.position(now);
-                walkingShot = walking.sample(now);
-                capeShot = cape.sample(now);
+                renderPosition = interpolation.position(now, intervalNanos);
+                walkingShot = walking.sample(now, intervalNanos);
+                capeShot = cape.sample(now, intervalNanos);
             }
             handShot = hands.update(now, player.getXRot(), player.getYRot(),
-                    state.velocity().horizontalSpeed(), state.grounded(), minecraft.isPaused());
+                    state.velocity().horizontalSpeed(), state.grounded(), minecraft.isPaused(), intervalNanos);
         } else {
             renderPosition = null;
             handShot = null;
@@ -189,8 +206,8 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
         boolean jump = keys.jumping;
         boolean crouch = keys.shiftKeyDown;
         var edges = latch.capture(jump, crouch, MovementKeys.TURN.isDown(), blocked);
-        boolean sprintHeld = sprint.capture(minecraft.options.keySprint.isDown(), forward > 0.7F && !crouch
-                && (state == null || state.mode() != MovementState.Mode.HARD_LANDING && state.surfaces().climb() == null),
+        boolean sprintHeld = sprint.capture(keys.hasForwardImpulse()
+                && (state == null || state.mode() != MovementState.Mode.HARD_LANDING),
                 MovementSprint.allowed(player), blocked);
         return new MovementInput(commandSequence, blocked ? 0 : forward, blocked ? 0 : strafe,
                 blocked ? 0 : rawStrafe, !blocked && jump, edges.jump(), !blocked && crouch, edges.crouch(),
@@ -224,7 +241,9 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
         if (player == null || !owns(player) || suspended) return;
         MovementCamera.restrictLook();
         importImpulse(player);
-        input = sampleInput(player, ++sequence, buttons);
+        var requested = sampleInput(player, ++sequence, buttons);
+        input = MovementSprint.apply(player, requested, state);
+        if (requested.sprintHeld() && !input.sprintHeld()) sprint.update(false);
         if (suspended || !history.add(input, impulses.pending())) {
             suspended = true;
             history.clear();
@@ -237,10 +256,9 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
             player.connection.send(new ServerboundCustomPayloadPacket(new FullInputPayload(epoch, input)));
         } else {
             publishInput(player, sequence);
-            var dispatch = outgoing.poll(System.nanoTime());
+            var dispatch = outgoing.poll(System.nanoTime(), intervalNanos);
             if (dispatch != null) dispatch.send();
         }
-        MovementSprint.apply(player, input, state);
         impulses.consume();
         var previous = state;
         var before = MinecraftMotionAdapter.core(player.position());
@@ -283,8 +301,7 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
                 || owner == player && session.epoch() == epoch && session.serverTick() <= sessionTick) {
             return;
         }
-        boolean reset = owner != player || epoch != session.epoch() || !tuning.equals(session.tuning())
-                || active != session.active();
+        boolean reset = owner != player || epoch != session.epoch() || active != session.active();
         owner = player;
         dimension = session.dimension();
         enabled = session.enabled();
@@ -303,8 +320,13 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
             sprint.update(false);
             awaitingReset = false;
             suspended = false;
+        } else if (tuningRevision != session.tuningRevision()) {
+            // The next matching baseline must replay pending commands with the new
+            // authoritative tuning, even if its acknowledged state still matches.
+            history.invalidatePredictions();
         }
         epoch = session.epoch();
+        tuningRevision = session.tuningRevision();
         sessionTick = session.serverTick();
         active = session.active();
         tuning = session.tuning();
@@ -319,6 +341,9 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
     private void reconcile(SnapshotPayload snapshot) {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player == null || owner != player || !active || snapshot.epoch() != epoch
+                // Snapshots arrive on the network thread; tuning metadata is ordered
+                // on the game thread. Retain a newer baseline until its metadata arrives.
+                || snapshot.tuningRevision() != tuningRevision
                 || !player.level().dimension().location().equals(dimension)
                 || snapshot.epoch() < minimumEpoch || snapshot.serverTick() <= serverTick) return;
         boolean baseline = state == null;
@@ -494,16 +519,20 @@ public final class ClientMovement implements MovementRuntime.ClientBridge {
     public long acknowledged() { return acknowledged; }
     public int pending() { return history.size(); }
     public double correction() { return correction; }
+    public long intervalNanos() { return intervalNanos; }
 
     private void startSimulation() {
-        simulation = new SimulationLoop(Minecraft.getInstance(), () -> {
+        Minecraft minecraft = Minecraft.getInstance();
+        float tickRate = minecraft.level == null ? MovementRate.GAME_TICK_HZ : minecraft.level.tickRateManager().tickrate();
+        intervalNanos = MovementRate.intervalNanos(tickRate);
+        simulation = new SimulationLoop(minecraft, () -> {
             try {
                 simulate();
             } catch (RuntimeException exception) {
                 MineEdge.LOGGER.error("Client movement simulation failed", exception);
                 if (active) requestReset();
             }
-        });
+        }, tickRate);
     }
 
     private ClientMovement() { startSimulation(); }

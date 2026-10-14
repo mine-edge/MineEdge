@@ -41,9 +41,9 @@ class MovementPersistenceTest {
         var surfaces = new SurfaceState(new SurfaceState.Climb(route, p, 0.2, 1, 2, 0.12, 0.5, true),
                 new SurfacePath(SurfacePath.Kind.ATTACH, p, p, p, p, v, null, p, 0.6, 0.12, MovementBody.CROUCHING),
                 0.2, 0.3, 0.4, 0.1, 0.7, n, 179, v);
-        var advanced = new AdvancedState(true, true, true, new AdvancedState.Turn(179, 180, 0.12, 0.2),
+        var advanced = new AdvancedState(true, true, new AdvancedState.Turn(179, 180, 0.12, 0.2),
                 new AdvancedState.LedgeMove(AdvancedState.LedgeKind.values()[0], p, p, p, n, box, box, 0.12, 0.7, 179, 90),
-                new AdvancedState.Springboard(path, 6.25, 0.12), 0.4, true);
+                new AdvancedState.Springboard(path, 6.25, 0.12));
         var session = new MovementSession();
         session.active = true;
         session.dimension = DIMENSION;

@@ -13,6 +13,7 @@ import dev.mineedge.movement.MovementVector;
 import dev.mineedge.movement.OffThreadMovement;
 import dev.mineedge.movement.SimulationLoop;
 import dev.mineedge.movement.WallRunPose;
+import dev.mineedge.movement.RollPose;
 import dev.mineedge.network.CommandInbox;
 import dev.mineedge.network.FullInputPayload;
 import dev.mineedge.network.HandTargetsPayload;
@@ -42,6 +43,7 @@ public final class MovementRuntime {
         boolean owns(Player player);
         void reset();
         void pose(Player player);
+        void sprintChanged(Player player, boolean sprinting);
     }
 
     private static final MovementController CONTROLLER = new MovementController();
@@ -57,6 +59,10 @@ public final class MovementRuntime {
         if (client != null) {
             client.reset();
         }
+    }
+
+    public static void sprintChanged(Player player) {
+        if (client != null && player.level().isClientSide()) client.sprintChanged(player, player.isSprinting());
     }
 
     public static boolean owns(Player player) {
@@ -97,7 +103,7 @@ public final class MovementRuntime {
         boolean eligible = MineEdgeServerConfig.enabledFor(player.gameMode.getGameModeForPlayer()) && MovementEligibility.supported(player)
                 && !awaitingTeleport(player);
         MovementTuning tuning = effectiveTuning(player);
-        if (session.active && (!eligible || !tuning.equals(session.tuning) || session.resetRequested)) {
+        if (session.active && (!eligible || session.resetRequested)) {
             resetSession(player, session);
         }
         if (eligible && !session.active) {
@@ -117,14 +123,24 @@ public final class MovementRuntime {
                     player.connection.getConnection().isMemoryConnection());
             session.input = MovementInput.idle(0, player.getYRot(), player.getXRot());
         } else if (session.active) {
+            // Attribute changes (aiming, potion effects, equipment) affect subsequent
+            // steps without discarding momentum, movement timers or queued commands.
+            if (!tuning.equals(session.tuning)) {
+                session.tuning = tuning;
+                session.tuningRevision++;
+            }
             // Import knockback/push changes before LivingEntity.aiStep's incidental damping.
             MovementVector impulse = MinecraftMotionAdapter.core(player.getDeltaMovement()).subtract(session.writtenVelocity);
             session.state = session.state.withVelocity(session.state.velocity().add(impulse.scale(20)));
             session.writtenVelocity = MinecraftMotionAdapter.core(player.getDeltaMovement());
         }
         if (session.active && session.simulation == null) {
-            session.simulation = new SimulationLoop(player.getServer(), () -> simulate(player, session));
+            session.simulation = new SimulationLoop(player.getServer(), () -> simulate(player, session),
+                    player.getServer().tickRateManager().tickrate());
             SIMULATIONS.put(player.getUUID(), session);
+        }
+        if (session.simulation != null) {
+            session.simulation.setTickRate(player.getServer().tickRateManager().tickrate());
         }
     }
 
@@ -157,10 +173,9 @@ public final class MovementRuntime {
             MovementVector currentVelocity = MinecraftMotionAdapter.core(player.getDeltaMovement());
             var impulse = currentVelocity.subtract(session.writtenVelocity).scale(20);
             session.state = session.state.withVelocity(session.state.velocity().add(impulse));
-            session.input = MovementSprint.validate(player, command);
-            player.setYRot(session.input.yaw());
-            player.setXRot(session.input.pitch());
-            MovementSprint.apply(player, session.input, session.state);
+            player.setYRot(command.yaw());
+            player.setXRot(command.pitch());
+            session.input = MovementSprint.apply(player, command, session.state);
             var result = OffThreadMovement.step(CONTROLLER, session.state, session.input, session.tuning,
                     MinecraftMotionAdapter.live(player));
             session.state = result.state();
@@ -200,11 +215,11 @@ public final class MovementRuntime {
         long tick = player.level().getGameTime();
         boolean enabled = MineEdgeServerConfig.enabledFor(player.gameMode.getGameModeForPlayer());
         var metadata = new SessionPayload(player.level().dimension().location(), session.epoch, tick,
-                enabled, session.active, snapshotTuning);
+                enabled, session.active, snapshotTuning, session.tuningRevision);
         if (session.snapshots.sessionDue(metadata)) {
             PacketDistributor.sendToPlayer(player, metadata);
         }
-        if (session.snapshots.due(tick, session.epoch, enabled,
+        if (session.snapshots.due(tick, session.epoch, session.tuningRevision, enabled,
                 session.active, session.state, player.getPose(), snapshotTuning, player.level().dimension().location(),
                 MineEdgeServerConfig.SNAPSHOT_INTERVAL_TICKS.get())) {
             PacketDistributor.sendToPlayer(player, SnapshotPayload.capture(player, session));
@@ -229,7 +244,8 @@ public final class MovementRuntime {
         float yaw = !sliding ? 0 : session.state.mode() == MovementState.Mode.STEEP_SLIDE ? session.state.surfaces().slopeYaw() : session.state.slideYaw();
         return new HandTargetsPayload(player.getId(), player.getUUID(), targets,
                 session.active && session.state.mode() == MovementState.Mode.LEDGE_HANG, sliding, yaw,
-                session.active ? WallRunPose.sample(session.state) : WallRunPose.EMPTY);
+                session.active ? WallRunPose.sample(session.state) : WallRunPose.EMPTY,
+                session.active ? RollPose.sample(session.state) : RollPose.EMPTY);
     }
 
     private static void applyInput(ServerPlayer player, FullInputPayload payload) {

@@ -18,7 +18,8 @@ abstract class PlayerSlideMixin {
     private float mineedge$slideSwimming(float original, AbstractClientPlayer player, PoseStack poses,
                                         float bob, float bodyYaw, float partialTick, float scale) {
         var shot = ThirdPersonHands.slideShot(player);
-        return shot == null ? original : original * (1 - shot.weight());
+        float weight = Math.max(shot == null ? 0 : shot.weight(), ThirdPersonHands.rollProneWeight(player));
+        return original * (1 - weight);
     }
 
     @WrapOperation(method = "setupRotations(Lnet/minecraft/client/player/AbstractClientPlayer;Lcom/mojang/blaze3d/vertex/PoseStack;FFFF)V",
@@ -27,7 +28,7 @@ abstract class PlayerSlideMixin {
                                           AbstractClientPlayer player, PoseStack renderPoses,
                                           float bob, float bodyYaw, float partialTick, float scale) {
         var shot = ThirdPersonHands.slideShot(player);
-        float weight = shot == null ? 1 : 1 - shot.weight();
+        float weight = 1 - Math.max(shot == null ? 0 : shot.weight(), ThirdPersonHands.rollProneWeight(player));
         original.call(poses, x * weight, y * weight, z * weight);
     }
 }
